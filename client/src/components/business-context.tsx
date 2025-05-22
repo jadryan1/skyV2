@@ -26,7 +26,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 // Validation schema for the business context
 const businessContextSchema = z.object({
   description: z.string().optional(),
-  link: z.string().min(1, { message: "Link is required" }).optional(),
+  link: z.string()
+    .min(1, { message: "Link is required" })
+    .refine((val) => val.includes('.'), { message: "Link should contain at least one period" })
+    .optional(),
 });
 
 type BusinessContextFormData = z.infer<typeof businessContextSchema>;
