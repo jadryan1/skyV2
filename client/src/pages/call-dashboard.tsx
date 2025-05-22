@@ -328,7 +328,7 @@ export default function CallDashboard() {
               className="w-full justify-start text-left font-normal hover:bg-gray-100 dark:hover:bg-gray-700"
               onClick={() => setLocation('/dashboard')}
             >
-              <Phone className="mr-3 h-5 w-5" />
+              <Home className="mr-3 h-5 w-5" />
               Home
             </Button>
             <Button
