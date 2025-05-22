@@ -44,7 +44,9 @@ export default function Login() {
     },
     onSuccess: (data) => {
       // Store user ID for authenticated requests
-      localStorage.setItem('user_id', data.userId);
+      localStorage.setItem('userId', data.user.id);
+      localStorage.setItem('userEmail', data.user.email);
+      
       toast({
         title: "Login successful", 
         description: "Redirecting to dashboard..."
