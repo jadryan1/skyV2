@@ -223,6 +223,27 @@ export default function BusinessProfile() {
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
+      
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: "Invalid file type",
+          description: "Please upload an image file",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      // Validate file size (max 2MB)
+      if (file.size > 2 * 1024 * 1024) {
+        toast({
+          title: "File too large",
+          description: "Please upload an image smaller than 2MB",
+          variant: "destructive"
+        });
+        return;
+      }
+
       setLogoFile(file);
       
       // Create a preview
@@ -230,13 +251,20 @@ export default function BusinessProfile() {
       reader.onload = (event) => {
         if (event.target && typeof event.target.result === 'string') {
           setLogoUrl(event.target.result);
-          // Save the logo to database
-          saveLogoMutation.mutate(event.target.result);
+          try {
+            // Save the logo to database
+            saveLogoMutation.mutate(event.target.result);
+            setLogoDialogOpen(false);
+          } catch (error) {
+            toast({
+              title: "Failed to update logo",
+              description: "Please try again with a different image",
+              variant: "destructive"
+            });
+          }
         }
       };
       reader.readAsDataURL(file);
-      
-      setLogoDialogOpen(false);
     }
   };
   
