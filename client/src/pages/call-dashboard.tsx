@@ -18,7 +18,8 @@ import {
   BookmarkCheck,
   AlertTriangle,
   Users,
-  Info
+  Info,
+  Home
 } from "lucide-react";
 
 import {
