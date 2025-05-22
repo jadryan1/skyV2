@@ -42,12 +42,14 @@ export default function Login() {
       const response = await apiRequest("POST", "/api/auth/login", data);
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Store user ID for authenticated requests
+      localStorage.setItem('user_id', data.userId);
       toast({
-        title: "Login successful",
-        description: "Redirecting to dashboard...",
+        title: "Login successful", 
+        description: "Redirecting to dashboard..."
       });
-      // Redirect to dashboard
+      // Redirect to dashboard  
       setLocation("/dashboard");
       setIsSubmitting(false);
     },
