@@ -74,17 +74,39 @@ export default function BusinessProfile() {
   const userId = 1;
   
   // Load business data from API
-  const { data: businessData, isLoading } = useQuery({
+  const { data: businessData, isLoading, error: queryError } = useQuery({
     queryKey: ['/api/business', userId],
     queryFn: async () => {
       try {
         const response = await apiRequest("GET", `/api/business/${userId}`);
+        if (response.status === 404) {
+          // Return empty data structure for new users
+          return { 
+            data: {
+              businessName: "",
+              businessEmail: "",
+              businessPhone: "",
+              businessAddress: "",
+              description: "",
+              links: [],
+              fileNames: [],
+              fileTypes: [],
+              fileSizes: [],
+              logoUrl: null
+            }
+          };
+        }
         if (!response.ok) {
           throw new Error("Failed to fetch business data");
         }
         return response.json();
       } catch (error) {
         console.error("Error fetching business data:", error);
+        toast({
+          title: "Error loading profile",
+          description: "There was an error loading your business profile. Please try refreshing the page.",
+          variant: "destructive"
+        });
         throw error;
       }
     }
