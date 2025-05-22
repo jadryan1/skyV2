@@ -118,13 +118,7 @@ export default function Dashboard() {
               <Phone className="mr-3 h-5 w-5" />
               Call Dashboard
             </Button>
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-left font-normal hover:bg-gray-100 dark:hover:bg-gray-700"
-            >
-              <Users className="mr-3 h-5 w-5" />
-              Leads Manager
-            </Button>
+            
             <Button
               variant="ghost"
               className="w-full justify-start text-left font-normal hover:bg-gray-100 dark:hover:bg-gray-700"
