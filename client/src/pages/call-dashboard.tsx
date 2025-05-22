@@ -329,7 +329,7 @@ export default function CallDashboard() {
               onClick={() => setLocation('/dashboard')}
             >
               <Phone className="mr-3 h-5 w-5" />
-              Dashboard
+              Home
             </Button>
             <Button
               variant="secondary"
