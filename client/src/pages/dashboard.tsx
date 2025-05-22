@@ -263,32 +263,6 @@ export default function Dashboard() {
 
             {/* Business Context */}
             <div className="lg:col-span-3">
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="text-xl font-semibold">Business Context</h2>
-                <Button
-                  onClick={() => {
-                    // Save the business context data to localStorage for the profile page to access
-                    localStorage.setItem('business-context', JSON.stringify({
-                      description: "", // This will be populated from your context
-                      links: [], // This will be populated from your context
-                      files: [] // This will be populated from your context
-                    }));
-                    
-                    // Navigate to business profile
-                    setLocation('/business-profile');
-                    
-                    // Show success message
-                    toast({
-                      title: "Context imported",
-                      description: "Your business context has been imported to your profile."
-                    });
-                  }}
-                  className="flex items-center gap-2"
-                >
-                  <Upload className="h-4 w-4" />
-                  Import to Profile
-                </Button>
-              </div>
               <BusinessContextPanel />
             </div>
           </div>
