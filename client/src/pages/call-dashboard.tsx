@@ -711,10 +711,10 @@ export default function CallDashboard() {
                       filteredCalls.map((call) => (
                         <TableRow key={call.id}>
                           <TableCell>
-                            <div className="font-medium">{call.date}</div>
-                            <div className="text-sm text-gray-500">{call.time}</div>
+                            <div className="font-medium">{new Date(call.date).toLocaleDateString()}</div>
+                            <div className="text-sm text-gray-500">{call.time || new Date(call.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
                           </TableCell>
-                          <TableCell>{call.number}</TableCell>
+                          <TableCell>{call.number || 'Unknown'}</TableCell>
                           <TableCell>{call.name || "Unknown"}</TableCell>
                           <TableCell>{call.duration}</TableCell>
                           <TableCell>{getStatusBadge(call.status)}</TableCell>
