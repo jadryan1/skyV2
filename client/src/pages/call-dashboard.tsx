@@ -530,13 +530,7 @@ export default function CallDashboard() {
                   </CardDescription>
                 </div>
                 <div className="flex flex-col space-y-2 md:flex-row md:space-x-2 md:space-y-0">
-                  <Button 
-                    onClick={() => setLocation('/call-review')}
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    <Info className="mr-2 h-4 w-4" />
-                    Review Calls
-                  </Button>
+                  
                   
                   <div className="relative">
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
