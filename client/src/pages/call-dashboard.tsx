@@ -767,7 +767,7 @@ export default function CallDashboard() {
           {/* Review Call Button */}
           <div className="mt-6 flex justify-center">
             <Button 
-              onClick={() => navigate('/call-review')}
+              onClick={() => setLocation('/call-review')}
               className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 text-lg"
               size="lg"
             >
