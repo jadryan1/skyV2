@@ -20,7 +20,8 @@ import {
   Users,
   Info,
   Home,
-  Building
+  Building,
+  FileText
 } from "lucide-react";
 import UserAvatar from "@/components/user-avatar";
 
