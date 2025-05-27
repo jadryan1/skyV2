@@ -30,12 +30,7 @@ export default function Login() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { user, isAuthenticated, isLoading, login } = useAuth();
   
-  // Force clear any existing authentication data on login page
-  useEffect(() => {
-    // Clear any existing authentication data when on login page
-    localStorage.removeItem('userId');
-    localStorage.removeItem('userEmail');
-  }, []);
+  // Don't clear localStorage on login page load
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
