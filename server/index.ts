@@ -1,6 +1,7 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import path from "path";
 
 // SSL certificate has been updated - normal TLS validation restored
 
@@ -57,6 +58,10 @@ app.use((req, res, next) => {
   } else {
     serveStatic(app);
   }
+
+  // Load SSL certificates
+  const certPath = path.join(process.cwd(), 'attached_assets', 'domain.cert_1756859747138.pem');
+  const keyPath = path.join(process.cwd(), 'attached_assets', 'private.key_1756859747139.pem');
 
   // ALWAYS serve the app on port 5000
   // this serves both the API and the client.
