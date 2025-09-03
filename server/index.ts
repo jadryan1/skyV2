@@ -2,6 +2,9 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import path from "path";
+import fs from "fs";
+import https from "https";
+import http from "http";
 
 // SSL certificate has been updated - normal TLS validation restored
 
@@ -67,11 +70,27 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = 5000;
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
+
+  let serverInstance;
+
+  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    try {
+      const httpsOptions = {
+        cert: fs.readFileSync(certPath, 'utf8'),
+        key: fs.readFileSync(keyPath, 'utf8')
+      };
+      serverInstance = https.createServer(httpsOptions, app);
+      log("HTTPS server configured with SSL certificates");
+    } catch (error) {
+      log(`SSL certificate error: ${error.message}, falling back to HTTP`);
+      serverInstance = http.createServer(app);
+    }
+  } else {
+    log("SSL certificates not found, using HTTP server");
+    serverInstance = http.createServer(app);
+  }
+
+  serverInstance.listen(port, "0.0.0.0", () => {
     log(`serving on port ${port}`);
   });
 })();
