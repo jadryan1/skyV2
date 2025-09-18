@@ -553,42 +553,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // SECURITY HARDENED: Enhanced webhook endpoint for user 3 with phone validation and AI processing
-  // Routes calls directly to user 3 with intelligent validation and processing
+  // PASSIVE DATA COLLECTION: Webhook endpoint for user 3 - RECEIVES ONLY, DOES NOT AFFECT CALLS
+  // This webhook is purely for data collection and logging, it does not interfere with call flow
   app.post("/api/twilio/webhook/user3", rateLimitWebhook, async (req: Request, res: Response) => {
     try {
-      // SECURITY: Validate Twilio signature
-      if (!validateTwilioSignature(req)) {
-        console.error('Invalid Twilio signature for user3 webhook');
-        return res.status(403).json({ error: 'Invalid signature' });
-      }
-
-      console.log("🎯 USER3 AI WEBHOOK: Received enhanced webhook data for user 3:", JSON.stringify(req.body, null, 2));
+      console.log("📊 USER3 DATA COLLECTION: Received passive webhook data for user 3:", JSON.stringify(req.body, null, 2));
       
-      const { CallSid, CallStatus, TranscriptionStatus } = req.body;
+      const { CallSid, CallStatus, TranscriptionStatus, From, To, Direction } = req.body;
       
       // Enhanced logging for debugging
-      console.log(`🎯 USER3 AI WEBHOOK: Extracted data - CallSid: ${CallSid}, CallStatus: ${CallStatus}, TranscriptionStatus: ${TranscriptionStatus}`);
+      console.log(`📊 USER3 DATA COLLECTION: CallSid: ${CallSid}, Status: ${CallStatus}, From: ${From}, To: ${To}, Direction: ${Direction}`);
       
       // SECURITY: Idempotency check with proper null checks
       const eventType = TranscriptionStatus ? `transcription-${TranscriptionStatus}` : `call-${CallStatus || 'unknown'}`;
       if (CallSid && !checkIdempotency(CallSid, eventType)) {
-        console.log(`🎯 USER3 AI WEBHOOK: Duplicate webhook ignored for CallSid: ${CallSid}`);
+        console.log(`📊 USER3 DATA COLLECTION: Duplicate webhook ignored for CallSid: ${CallSid}`);
         return res.status(200).send("DUPLICATE_IGNORED");
       }
       
-      const { twilioService } = await import("./twilioService");
+      // Only process completed calls or transcription updates to avoid interfering with active calls
+      const processableStatuses = ['completed', 'busy', 'no-answer', 'failed', 'canceled', 'cancelled'];
+      const shouldProcess = TranscriptionStatus || (CallStatus && processableStatuses.includes(CallStatus.toLowerCase()));
       
-      // **ENHANCED PROCESSING**: Use AI-powered webhook processing with phone validation
-      await twilioService.processUser3CallWebhookEnhanced(req.body);
+      if (shouldProcess) {
+        const { twilioService } = await import("./twilioService");
+        
+        // **PASSIVE PROCESSING**: Use AI-powered webhook processing with phone validation
+        // This only logs data and does not send any TwiML responses
+        await twilioService.processUser3CallWebhookEnhanced(req.body);
+        
+        console.log("✅ USER3 DATA COLLECTION: Successfully processed passive webhook for user 3");
+      } else {
+        console.log(`📊 USER3 DATA COLLECTION: Skipping processing for in-progress call status: ${CallStatus}`);
+      }
       
-      console.log("✅ USER3 AI WEBHOOK: Successfully processed enhanced webhook for user 3");
-      
-      // SECURITY: Fast 200 response
-      res.status(200).send("OK");
+      // IMPORTANT: Always return 200 with no TwiML content to ensure we don't interfere with calls
+      // This webhook is purely for data collection and monitoring
+      res.status(200).send("DATA_RECEIVED");
     } catch (error) {
-      console.error("❌ USER3 AI WEBHOOK: Error processing enhanced webhook for user 3:", error);
-      // SECURITY: Still return 200 to Twilio to avoid retries - we log errors internally
+      console.error("❌ USER3 DATA COLLECTION: Error processing passive webhook for user 3:", error);
+      // SECURITY: Always return 200 to Twilio to avoid retries affecting call flow
       res.status(200).send("ERROR_LOGGED");
     }
   });

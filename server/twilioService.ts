@@ -13,11 +13,11 @@ try {
 } catch (error) {
   console.warn('PhoneValidationService not available, using basic validation');
   PhoneValidationService = {
-    validatePhoneNumber: (phone: string) => ({ 
-      isValid: true, 
-      isTestNumber: false, 
+    validatePhoneNumber: (phone: string) => ({
+      isValid: true,
+      isTestNumber: false,
       normalizedNumber: phone,
-      reason: 'service_unavailable' 
+      reason: 'service_unavailable'
     }),
     logValidation: () => {}
   };
@@ -42,7 +42,7 @@ export class TwilioService {
   async processRecordingWebhook(webhookData: any): Promise<void> {
     try {
       const { CallSid, RecordingUrl, RecordingSid } = webhookData;
-      
+
       if (!CallSid || !RecordingUrl) {
         console.log("Recording webhook missing CallSid or RecordingUrl");
         return;
@@ -62,7 +62,7 @@ export class TwilioService {
   async processTranscriptionWebhook(webhookData: any): Promise<void> {
     try {
       const { CallSid, TranscriptionText, TranscriptionUrl } = webhookData;
-      
+
       if (!CallSid || !TranscriptionText) {
         console.log("Transcription webhook missing CallSid or TranscriptionText");
         return;
@@ -135,7 +135,7 @@ export class TwilioService {
       const result = await storage.createCall(callData);
       console.log(`📞 Call logged for user ${user.id}: ${CallSid}`);
       console.log(`📣 Generated prompt: ${prompt}`);
-      
+
       // Broadcast real-time call update to connected clients
       try {
         const broadcastData = {
@@ -148,7 +148,7 @@ export class TwilioService {
           },
           timestamp: new Date().toISOString()
         };
-        
+
         const clientCount = wsManager.broadcastToUser(user.id, broadcastData);
         console.log(`📡 Broadcasted Twilio call to ${clientCount} connected clients for user ${user.id}`);
       } catch (error) {
@@ -228,7 +228,7 @@ export class TwilioService {
         direction: Direction,
         twilioCallSid: CallSid
       });
-      
+
       // Broadcast real-time call update to connected clients for user 3
       try {
         const broadcastData = {
@@ -241,7 +241,7 @@ export class TwilioService {
           },
           timestamp: new Date().toISOString()
         };
-        
+
         const clientCount = wsManager.broadcastToUser(userId, broadcastData);
         console.log(`📡 USER3 WEBHOOK: Broadcasted call to ${clientCount} connected clients for user 3`);
       } catch (error) {
@@ -253,14 +253,25 @@ export class TwilioService {
   }
 
   /**
-   * Enhanced webhook processor for user 3 with phone validation and AI-powered call intelligence
+   * PASSIVE Enhanced webhook processor for user 3 with phone validation and AI-powered call intelligence
    * Validates phone numbers and processes calls with OpenAI-powered insights
    * Rejects test/fake numbers and only processes legitimate call data
+   * IMPORTANT: This is purely for data collection and does not affect active calls
    */
   async processUser3CallWebhookEnhanced(webhookData: any): Promise<void> {
     try {
-      console.log(`🎯 USER3 WEBHOOK: Raw webhook data received:`, JSON.stringify(webhookData, null, 2));
-      
+      console.log(`📊 USER3 PASSIVE COLLECTION: Processing intelligent webhook for user 3 - CallSid: ${CallSid}`);
+      console.log(`📞 USER3 PASSIVE COLLECTION: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
+
+      // Only process calls that are definitely completed to avoid interfering with active calls
+      if (CallStatus && ['in-progress', 'ringing', 'queued'].includes(CallStatus.toLowerCase())) {
+        console.log(`📊 USER3 PASSIVE COLLECTION: Skipping processing for active call status: ${CallStatus}`);
+        return;
+      }
+    } catch (error) {
+      console.error('❌ USER3 AI ENHANCED: Error processing intelligent webhook for user 3:', error);
+    }
+    try {
       const {
         CallSid,
         From,
@@ -272,15 +283,6 @@ export class TwilioService {
         TranscriptionText,
         TranscriptionUrl
       } = webhookData;
-
-      // Basic validation to prevent crashes
-      if (!CallSid) {
-        console.error(`❌ USER3 WEBHOOK: Missing CallSid in webhook data`);
-        return;
-      }
-
-      console.log(`🎯 USER3 AI ENHANCED: Processing intelligent webhook for user 3 - CallSid: ${CallSid}`);
-      console.log(`📞 USER3 AI ENHANCED: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
 
       // Hardcode userId to 3 - bypass phone number matching
       const userId = 3;
@@ -303,11 +305,11 @@ export class TwilioService {
       } catch (error) {
         console.error(`❌ USER3 WEBHOOK: Phone validation error for ${phoneNumber}:`, error);
         // Use basic validation if service fails
-        phoneValidation = { 
-          isValid: true, 
-          isTestNumber: false, 
+        phoneValidation = {
+          isValid: true,
+          isTestNumber: false,
           normalizedNumber: phoneNumber,
-          reason: 'validation_service_failed' 
+          reason: 'validation_service_failed'
         };
       }
 
@@ -328,28 +330,28 @@ export class TwilioService {
 
       if (TranscriptionText && TranscriptionText.trim()) {
         console.log(`📝 USER3 AI ENHANCED: Analyzing transcript: ${TranscriptionText.substring(0, 100)}...`);
-        
+
         try {
           // **AI-POWERED TRANSCRIPT VALIDATION**
           transcriptAnalysis = await aiService.analyzeTranscriptAuthenticity(TranscriptionText);
-          
+
           if (!transcriptAnalysis.isRealTranscript) {
             console.warn(`⚠️ USER3 AI ENHANCED: REJECTING fake/test transcript - ${transcriptAnalysis.reason}`);
             console.warn(`📊 USER3 AI ENHANCED: TRANSCRIPT REJECTED - Not processing fake transcript data`);
             // Continue processing the call but without transcript data
           } else {
             console.log(`✅ USER3 AI ENHANCED: Transcript validated as authentic (confidence: ${transcriptAnalysis.confidence})`);
-            
+
             try {
               // **AI-POWERED CALL ANALYSIS**
               const businessInfo = await storage.getBusinessInfo(userId);
               aiAnalysis = await aiService.analyzeCall(TranscriptionText, businessInfo);
-              
+
               if (aiAnalysis) {
                 console.log(`🤖 USER3 AI ENHANCED: AI analysis completed - Sentiment: ${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}/5)`);
                 console.log(`💡 USER3 AI ENHANCED: Call purpose: ${aiAnalysis.callPurpose}`);
                 console.log(`📋 USER3 AI ENHANCED: Key points: ${aiAnalysis.keyPoints.length} identified`);
-                
+
                 intelligentSummary = aiAnalysis.summary;
                 suggestedContactName = aiAnalysis.suggestedContactName;
               }
@@ -383,8 +385,8 @@ export class TwilioService {
         contactName: suggestedContactName, // AI-suggested contact name
         duration: CallDuration ? parseInt(CallDuration) : null,
         status,
-        notes: aiAnalysis ? 
-          `${this.getCallStatusNote(status, CallStatus, CallDuration)} | AI Quality: ${aiAnalysis.callQuality} | Follow-up: ${aiAnalysis.followUpRequired ? 'Required' : 'None'}` : 
+        notes: aiAnalysis ?
+          `${this.getCallStatusNote(status, CallStatus, CallDuration)} | AI Quality: ${aiAnalysis.callQuality} | Follow-up: ${aiAnalysis.followUpRequired ? 'Required' : 'None'}` :
           this.getCallStatusNote(status, CallStatus, CallDuration),
         summary: intelligentSummary, // AI-generated summary
         transcript: transcriptAnalysis?.isRealTranscript ? TranscriptionText : null, // Only store real transcripts
@@ -427,7 +429,7 @@ export class TwilioService {
           followUpRequired: aiAnalysis.followUpRequired
         });
       }
-      
+
       // Broadcast real-time call update to connected clients for user 3
       try {
         const broadcastData = {
@@ -448,7 +450,7 @@ export class TwilioService {
           },
           timestamp: new Date().toISOString()
         };
-        
+
         const clientCount = wsManager.broadcastToUser(userId, broadcastData);
         console.log(`📡 USER3 AI ENHANCED: Broadcasted intelligent call update to ${clientCount} connected clients`);
       } catch (error) {
@@ -467,13 +469,13 @@ export class TwilioService {
     try {
       // Get all business info records with Twilio settings
       const businessInfos = await storage.getAllBusinessInfoWithTwilio();
-      
+
       for (const info of businessInfos) {
         if (!info.twilioPhoneNumber) continue;
-        
+
         const userNumber = this.normalizePhoneNumber(info.twilioPhoneNumber);
         const callNumber = this.normalizePhoneNumber(direction === 'inbound' ? to : from);
-        
+
         // Exact match ensures no cross-contamination between accounts
         if (userNumber === callNumber) {
           const user = await storage.getUser(info.userId);
@@ -483,7 +485,7 @@ export class TwilioService {
           }
         }
       }
-      
+
       console.log(`No user found for Twilio number: ${direction === 'inbound' ? to : from}`);
       return null;
     } catch (error) {
@@ -504,11 +506,11 @@ export class TwilioService {
    */
   private getCallStatusNote(status: string, twilioStatus: string, duration?: string): string {
     const callDuration = duration ? `${Math.floor(parseInt(duration) / 60)}m ${parseInt(duration) % 60}s` : '';
-    
+
     switch (twilioStatus.toLowerCase()) {
       case 'completed':
-        return duration && parseInt(duration) < 10 ? 
-          'Customer ended call quickly' : 
+        return duration && parseInt(duration) < 10 ?
+          'Customer ended call quickly' :
           `Call completed ${callDuration}`;
       case 'busy':
         return 'Customer line was busy';
@@ -537,23 +539,23 @@ export class TwilioService {
       case 'in-progress':
       case 'ringing':
         return 'in-progress';
-      
+
       // Successful completed calls
       case 'completed':
         return 'completed';
-      
+
       // Customer/caller ended calls early or didn't answer
       case 'busy':
       case 'no-answer':
       case 'queued':
         return 'missed';
-      
-      // Failed or canceled calls  
+
+      // Failed or canceled calls
       case 'failed':
       case 'canceled':
       case 'cancelled': // Alternative spelling
         return 'failed';
-      
+
       // Default for any other status - log it so we can see what we're missing
       default:
         console.log(`📋 Unmapped call status: ${twilioStatus} - defaulting to 'completed'`);
@@ -568,28 +570,28 @@ export class TwilioService {
     try {
       // Create Twilio client with user's credentials
       const userTwilioClient = twilio(accountSid, authToken);
-      
+
       // The webhook URL that Twilio will call for completed calls
       const webhookUrl = `${process.env.REPLIT_DOMAINS?.split(',')[0] ? `https://${process.env.REPLIT_DOMAINS.split(',')[0]}` : 'http://localhost:5000'}/api/twilio/webhook`;
-      
+
       // Find the phone number resource and update its webhook
       const phoneNumbers = await userTwilioClient.incomingPhoneNumbers.list();
       const targetNumber = phoneNumbers.find(num => num.phoneNumber === phoneNumber);
-      
+
       if (targetNumber) {
         await userTwilioClient.incomingPhoneNumbers(targetNumber.sid)
           .update({
             statusCallback: webhookUrl,
             statusCallbackMethod: 'POST'
           });
-        
+
         console.log(`✅ Webhook configured for ${phoneNumber} - calls will sync to Sky IQ`);
         return true;
       } else {
         console.log(`❌ Phone number ${phoneNumber} not found in Twilio account`);
         return false;
       }
-      
+
     } catch (error) {
       console.error('Error setting up Twilio webhooks:', error);
       return false;
@@ -637,7 +639,7 @@ export class TwilioService {
   async validateUniquePhoneNumber(userId: number, phoneNumber: string): Promise<boolean> {
     try {
       const businessInfos = await storage.getAllBusinessInfoWithTwilio();
-      
+
       for (const info of businessInfos) {
         // Check if another user already has this phone number
         if (info.userId !== userId && info.twilioPhoneNumber === phoneNumber) {
@@ -645,7 +647,7 @@ export class TwilioService {
           return false;
         }
       }
-      
+
       return true;
     } catch (error) {
       console.error('Error validating phone number uniqueness:', error);
