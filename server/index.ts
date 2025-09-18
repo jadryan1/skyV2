@@ -5,7 +5,7 @@ import path from "path";
 import fs from "fs";
 import https from "https";
 import http from "http";
-import WebSocket from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 
 // SSL certificate has been updated - normal TLS validation restored
 
@@ -100,12 +100,6 @@ export { wsManager };
 
 // Raw body capture middleware for webhook signature verification
 // This must be before express.json() to capture the raw bytes
-function rawBodyCapture(req: any, res: any, buf: Buffer, encoding: string) {
-  req.rawBody = buf;
-}
-
-// Apply raw body capture only to ElevenLabs webhook routes
-app.use('/api/elevenlabs/webhook', express.raw({ type: 'application/json', verify: rawBodyCapture }));
 
 // Standard JSON parsing for all other routes
 app.use(express.json());
@@ -157,7 +151,7 @@ app.use((req, res, next) => {
   const server = await registerRoutes(app);
   
   // Setup WebSocket server alongside Express
-  const wss = new WebSocket.Server({ server });
+  const wss = new WebSocketServer({ server });
   
   wss.on('connection', (ws: WebSocketClient, req) => {
     log('New WebSocket connection established');
