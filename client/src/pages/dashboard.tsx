@@ -51,7 +51,7 @@ export default function Dashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isMobile = useIsMobile();
   const [csvFile, setCsvFile] = useState<File | null>(null);
-  
+
   // Get current user ID from localStorage
   const userId = Number(localStorage.getItem('userId')) || 1;
 
@@ -64,11 +64,11 @@ export default function Dashboard() {
       targetAudience: "",
     },
   });
-  
+
   // Load business profile data to get the logo
   const [businessLogo, setBusinessLogo] = useState<string | null>(null);
   const [businessName, setBusinessName] = useState<string>("");
-  
+
   // Fetch recent calls for this user
   const { data: callsData } = useQuery({
     queryKey: ['/api/calls/user', userId],
@@ -81,7 +81,7 @@ export default function Dashboard() {
       return [];
     }
   });
-  
+
   // Use the latest 4 calls for the dashboard
   const recentCalls = callsData ? callsData.slice(0, 4) : [];
 
@@ -135,12 +135,12 @@ export default function Dashboard() {
     onSuccess: () => {
       // Invalidate and refetch
       queryClient.invalidateQueries({ queryKey: ['/api/business', userId] });
-      
+
       toast({
         title: "Leads Uploaded Successfully",
         description: "Your lead file has been saved and will appear in your Business Profile.",
       });
-      
+
       // Reset file input
       const fileInput = document.getElementById("csv-upload") as HTMLInputElement;
       if (fileInput) fileInput.value = "";
@@ -168,11 +168,11 @@ export default function Dashboard() {
         title: "File Upload Started",
         description: `Uploading ${csvFile.name}...`,
       });
-      
+
       // Create a mock file URL (in production, this would be a real cloud storage URL)
       const mockFileUrl = `lead://${userId}/${Date.now()}-${encodeURIComponent(csvFile.name)}`;
       const fileSizeString = formatFileSize(csvFile.size);
-      
+
       // Save lead file to database
       uploadLeadMutation.mutate({
         fileUrl: mockFileUrl,
@@ -208,7 +208,7 @@ export default function Dashboard() {
             </h1>
           </div>
 
-          <nav className="flex-1 px-2 py-4 space-y-1">
+          <nav className="flex-1 px-2 py-4 space-1">
             <Button
               variant="ghost"
               className="w-full justify-start text-left font-normal hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -217,7 +217,7 @@ export default function Dashboard() {
               <Phone className="mr-3 h-5 w-5" />
               Call Dashboard
             </Button>
-            
+
             <Button
               variant="ghost"
               className="w-full justify-start text-left font-normal hover:bg-gray-100 dark:hover:bg-gray-700"

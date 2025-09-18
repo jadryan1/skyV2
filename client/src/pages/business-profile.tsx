@@ -93,10 +93,7 @@ export default function BusinessProfile() {
   const [logoUrl, setLogoUrl] = useState("");
   const [logoFile, setLogoFile] = useState<File | null>(null);
   
-  // ElevenLabs integration state
-  const [elevenLabsApiKey, setElevenLabsApiKey] = useState("");
-  const [elevenLabsAgentId, setElevenLabsAgentId] = useState("");
-  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  
   
   // Dialog state for logo upload
   const [logoDialogOpen, setLogoDialogOpen] = useState(false);
@@ -219,9 +216,7 @@ export default function BusinessProfile() {
         setLogoUrl(businessData.data.logoUrl);
       }
       
-      // Set ElevenLabs credentials if available
-      setElevenLabsApiKey(businessData.data.elevenLabsApiKey || "");
-      setElevenLabsAgentId(businessData.data.elevenLabsAgentId || "");
+      
     } else if (!isLoading) {
       // Keep current values, only set defaults for new users
       if (!businessName) setBusinessName("Your Business Name");
@@ -277,80 +272,7 @@ export default function BusinessProfile() {
     }
   });
 
-  // Test ElevenLabs connection
-  const testElevenLabsConnection = async () => {
-    if (!elevenLabsApiKey.trim()) {
-      toast({
-        title: "API Key Required",
-        description: "Please enter your ElevenLabs API key to test the connection.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsTestingConnection(true);
-    
-    try {
-      const response = await apiRequest("POST", "/api/eleven-labs/test-connection", {
-        apiKey: elevenLabsApiKey.trim(),
-        agentId: elevenLabsAgentId.trim() || undefined
-      });
-      
-      const result = await response.json();
-      
-      if (result.success && result.data.valid) {
-        toast({
-          title: "Connection Successful",
-          description: "Your ElevenLabs credentials are valid and working!"
-        });
-      } else {
-        toast({
-          title: "Connection Failed",
-          description: result.data.message || "Invalid credentials or API error. Please check your API key.",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
-      console.error("Error testing ElevenLabs connection:", error);
-      toast({
-        title: "Connection Test Failed", 
-        description: "There was an error testing the connection. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsTestingConnection(false);
-    }
-  };
-
-  // Save ElevenLabs credentials
-  const saveElevenLabsCredentials = async () => {
-    try {
-      const response = await apiRequest("POST", `/api/business/${userId}/profile`, {
-        businessName,
-        businessEmail,
-        businessPhone,
-        businessAddress,
-        description: businessDescription,
-        elevenLabsApiKey: elevenLabsApiKey.trim() || undefined,
-        elevenLabsAgentId: elevenLabsAgentId.trim() || undefined
-      });
-      
-      if (response.ok) {
-        queryClient.invalidateQueries({ queryKey: ['/api/business', userId] });
-        toast({
-          title: "ElevenLabs Integration Saved",
-          description: "Your ElevenLabs credentials have been saved successfully."
-        });
-      }
-    } catch (error) {
-      console.error("Error saving ElevenLabs credentials:", error);
-      toast({
-        title: "Failed to Save",
-        description: "There was an error saving your ElevenLabs credentials. Please try again.",
-        variant: "destructive"
-      });
-    }
-  };
+  
   
   // Delete document file mutation
   const removeFileMutation = useMutation({
@@ -716,11 +638,10 @@ export default function BusinessProfile() {
                 {/* Business information */}
                 <div className="md:col-span-2 space-y-6">
                   <Tabs defaultValue="description" className="w-full">
-                    <TabsList className="grid w-full grid-cols-4">
+                    <TabsList className="grid w-full grid-cols-3">
                       <TabsTrigger value="description">Description</TabsTrigger>
                       <TabsTrigger value="links">Links</TabsTrigger>
                       <TabsTrigger value="files">Files</TabsTrigger>
-                      <TabsTrigger value="integrations">Integrations</TabsTrigger>
                     </TabsList>
                     <TabsContent value="description" className="p-4 border rounded-md mt-4">
                       <div className="space-y-4">
@@ -826,70 +747,10 @@ export default function BusinessProfile() {
                     </TabsContent>
                     <TabsContent value="integrations" className="p-4 border rounded-md mt-4">
                       <div className="space-y-6">
-                        <div>
-                          <h3 className="text-lg font-medium">ElevenLabs Integration</h3>
-                          <p className="text-sm text-gray-500 mt-1">
-                            Connect your ElevenLabs account to display conversation data from your AI agents in the dashboard.
-                          </p>
-                        </div>
-                        
-                        <div className="space-y-4">
-                          <div>
-                            <Label htmlFor="eleven-labs-api-key">ElevenLabs API Key</Label>
-                            <Input
-                              id="eleven-labs-api-key"
-                              type="password"
-                              value={elevenLabsApiKey}
-                              onChange={(e) => setElevenLabsApiKey(e.target.value)}
-                              placeholder="Enter your ElevenLabs API key..."
-                              className="mt-1"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">
-                              You can find your API key in your ElevenLabs account settings.
-                            </p>
-                          </div>
-                          
-                          <div>
-                            <Label htmlFor="eleven-labs-agent-id">Agent ID (Optional)</Label>
-                            <Input
-                              id="eleven-labs-agent-id"
-                              value={elevenLabsAgentId}
-                              onChange={(e) => setElevenLabsAgentId(e.target.value)}
-                              placeholder="Enter specific agent ID to filter conversations..."
-                              className="mt-1"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">
-                              Leave blank to fetch conversations from all agents, or specify an agent ID to filter.
-                            </p>
-                          </div>
-                          
-                          <div className="flex gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={testElevenLabsConnection}
-                              disabled={isTestingConnection || !elevenLabsApiKey.trim()}
-                            >
-                              {isTestingConnection ? "Testing..." : "Test Connection"}
-                            </Button>
-                            
-                            <Button
-                              type="button"
-                              onClick={saveElevenLabsCredentials}
-                              disabled={!elevenLabsApiKey.trim()}
-                            >
-                              Save Integration
-                            </Button>
-                          </div>
-                          
-                          {elevenLabsApiKey && (
-                            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
-                              <p className="text-sm text-blue-800 dark:text-blue-200">
-                                <strong>Note:</strong> Once saved, your ElevenLabs conversations will appear in your call dashboard alongside Twilio calls, 
-                                providing a unified view of all customer interactions.
-                              </p>
-                            </div>
-                          )}
+                        <div className="text-center py-8 text-gray-500">
+                          <Info className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                          <p>Integration features are currently being updated</p>
+                          <p className="text-sm">Check back soon for new integration options</p>
                         </div>
                       </div>
                     </TabsContent>
