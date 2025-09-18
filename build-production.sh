@@ -15,10 +15,16 @@ npx esbuild server/index.ts \
   --format=esm \
   --target=es2022 \
   --outfile=dist/index.js \
-  --minify \
   --sourcemap \
-  --external:vite.config.ts \
-  --external:@replit/vite-plugin-cartographer
+  --define:process.env.NODE_ENV="\"production\"" \
+  --define:import.meta.env.DEV=false \
+  --define:import.meta.env.PROD=true \
+  --keep-names \
+  --tree-shaking=true \
+  --external:vite \
+  --external:@vitejs/plugin-react \
+  --external:@replit/vite-plugin-cartographer \
+  --external:@replit/vite-plugin-runtime-error-modal
 
 # Also build the standalone launcher for compatibility
 echo "🚀 Building standalone launcher..."
