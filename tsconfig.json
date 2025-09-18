@@ -18,7 +18,6 @@
     "allowJs": true,
     "baseUrl": ".",
     "types": ["node", "vite/client"],
-    "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "paths": {
