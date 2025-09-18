@@ -49,6 +49,8 @@ export interface IStorage {
   createCall(callData: InsertCall): Promise<Call>;
   updateCallRecording(twilioCallSid: string, recordingUrl: string): Promise<void>;
   updateCallTranscript(twilioCallSid: string, transcript: string): Promise<void>;
+  getCallByTwilioSid(callSid: string): Promise<any>;
+  updateCall(callId: number, updateData: Partial<any>): Promise<void>;
   generateApiKey(userId: number): Promise<string>;
   validateApiKey(apiKey: string): Promise<User | null>;
   revokeApiKey(userId: number): Promise<void>;
@@ -547,36 +549,37 @@ export class DatabaseStorage implements IStorage {
 
   // Update call with recording URL
   async updateCallRecording(twilioCallSid: string, recordingUrl: string): Promise<void> {
-    try {
-      await db
-        .update(calls)
-        .set({ recordingUrl })
-        .where(eq(calls.twilioCallSid, twilioCallSid));
-      console.log(`Recording URL updated for call ${twilioCallSid}`);
-    } catch (error) {
-      console.error("Error updating call recording:", error);
-      throw error;
-    }
+    await db.update(calls)
+      .set({ recordingUrl })
+      .where(eq(calls.twilioCallSid, twilioCallSid));
   }
 
   // Update call with transcript and generate intelligent summary
   async updateCallTranscript(twilioCallSid: string, transcript: string): Promise<void> {
-    try {
-      // Generate intelligent summary from transcript
-      const summary = this.generateCallSummary(transcript);
+    await db.update(calls)
+      .set({ transcript })
+      .where(eq(calls.twilioCallSid, twilioCallSid));
+  }
 
-      await db
-        .update(calls)
-        .set({
-          transcript,
-          summary
-        })
-        .where(eq(calls.twilioCallSid, twilioCallSid));
-      console.log(`Transcript and summary updated for call ${twilioCallSid}`);
-    } catch (error) {
-      console.error("Error updating call transcript:", error);
-      throw error;
-    }
+  /**
+   * Get call by Twilio Call SID
+   */
+  async getCallByTwilioSid(callSid: string): Promise<any> {
+    const result = await db.select()
+      .from(calls)
+      .where(eq(calls.twilioCallSid, callSid))
+      .limit(1);
+
+    return result.length > 0 ? result[0] : null;
+  }
+
+  /**
+   * Update call record with partial data
+   */
+  async updateCall(callId: number, updateData: Partial<any>): Promise<void> {
+    await db.update(calls)
+      .set(updateData)
+      .where(eq(calls.id, callId));
   }
 
   // Generate intelligent business-focused call summary from transcript

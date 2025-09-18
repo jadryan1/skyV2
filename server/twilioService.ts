@@ -242,9 +242,9 @@ export class TwilioService {
   }
 
   /**
-   * RAW DATA COLLECTION: Simple webhook processor for user 3 - NO AI, NO FILTERING
-   * Captures ALL call data including full transcripts without any processing
-   * IMPORTANT: This is purely for data collection and does not affect active calls
+   * ENHANCED USER3 WEBHOOK: Captures ALL call data including full transcripts and audio recordings
+   * Ensures every call for user 3 leaves a complete record with transcript and recording URL
+   * IMPORTANT: This is for comprehensive data collection and does not affect active calls
    */
   async processUser3CallWebhookEnhanced(webhookData: any): Promise<void> {
     try {
@@ -256,13 +256,16 @@ export class TwilioService {
         CallDuration,
         Direction,
         RecordingUrl,
+        RecordingSid,
         TranscriptionText,
-        TranscriptionUrl
+        TranscriptionUrl,
+        TranscriptionStatus
       } = webhookData;
 
-      console.log(`📊 USER3 RAW DATA: Processing webhook for user 3 - CallSid: ${CallSid}`);
-      console.log(`📞 USER3 RAW DATA: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
-      console.log(`📝 USER3 RAW DATA: Full transcript length: ${TranscriptionText ? TranscriptionText.length : 0} chars`);
+      console.log(`🎯 USER3 ENHANCED: Processing webhook for user 3 - CallSid: ${CallSid}`);
+      console.log(`📞 USER3 ENHANCED: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
+      console.log(`📝 USER3 ENHANCED: Full transcript: ${TranscriptionText ? `${TranscriptionText.length} chars` : 'None'}`);
+      console.log(`🎵 USER3 ENHANCED: Recording: ${RecordingUrl ? 'Available' : 'Pending'}`);
 
       // Hardcode userId to 3 - bypass phone number matching
       const userId = 3;
@@ -270,7 +273,7 @@ export class TwilioService {
       // Get user 3 to verify they exist
       const user = await storage.getUser(userId);
       if (!user) {
-        console.log(`❌ USER3 RAW DATA: User 3 not found in database`);
+        console.log(`❌ USER3 ENHANCED: User 3 not found in database`);
         return;
       }
 
@@ -280,64 +283,109 @@ export class TwilioService {
       // Map Twilio status to our status enum
       const status = this.mapTwilioStatus(CallStatus);
 
-      // **CREATE RAW CALL RECORD - NO AI PROCESSING**
-      const callData: InsertCall = {
+      // Check if this call already exists in database
+      const existingCall = await storage.getCallByTwilioSid(CallSid);
+      
+      if (existingCall) {
+        // **UPDATE EXISTING CALL WITH NEW DATA**
+        console.log(`🔄 USER3 ENHANCED: Updating existing call ${CallSid} with new data`);
+        
+        const updateData: any = {};
+        
+        // Update transcript if provided
+        if (TranscriptionText && TranscriptionText.length > 0) {
+          updateData.transcript = TranscriptionText;
+          updateData.summary = `📝 Full transcript captured (${TranscriptionText.length} characters): ${TranscriptionText.substring(0, 200)}...`;
+          console.log(`📝 USER3 ENHANCED: Updated transcript for call ${CallSid}`);
+        }
+        
+        // Update recording URL if provided
+        if (RecordingUrl) {
+          updateData.recordingUrl = RecordingUrl;
+          console.log(`🎵 USER3 ENHANCED: Updated recording URL for call ${CallSid}`);
+        }
+        
+        // Update status if changed
+        if (CallStatus) {
+          updateData.status = status;
+          updateData.notes = this.getCallStatusNote(status, CallStatus, CallDuration);
+        }
+        
+        // Update duration if provided
+        if (CallDuration) {
+          updateData.duration = parseInt(CallDuration);
+        }
+        
+        // Apply updates
+        if (Object.keys(updateData).length > 0) {
+          await storage.updateCall(existingCall.id, updateData);
+          console.log(`✅ USER3 ENHANCED: Updated call record ${CallSid} with:`, Object.keys(updateData));
+        }
+        
+      } else {
+        // **CREATE NEW CALL RECORD WITH FULL DATA**
+        const callData: InsertCall = {
+          userId: userId,
+          phoneNumber: phoneNumber,
+          contactName: null, // No AI processing
+          duration: CallDuration ? parseInt(CallDuration) : null,
+          status,
+          notes: this.getCallStatusNote(status, CallStatus, CallDuration),
+          summary: TranscriptionText ? 
+            `📝 Full transcript captured (${TranscriptionText.length} characters): ${TranscriptionText.substring(0, 200)}...` : 
+            'Call captured - awaiting transcript',
+          transcript: TranscriptionText || null, // Store FULL transcript as-is
+          twilioCallSid: CallSid,
+          direction: Direction,
+          recordingUrl: RecordingUrl || null,
+          isFromTwilio: true,
+          aiPrompt: null, // No AI processing
+        } as any;
+
+        const result = await storage.createCall(callData);
+        console.log(`✅ USER3 ENHANCED: Created new call record for user 3: ${CallSid}`);
+      }
+
+      // **COMPREHENSIVE LOGGING FOR MONITORING**
+      console.log(`📊 USER3 ENHANCED: Complete call data processing:`, {
         userId: userId,
         phoneNumber: phoneNumber,
-        contactName: null, // No AI suggestion
-        duration: CallDuration ? parseInt(CallDuration) : null,
-        status,
-        notes: this.getCallStatusNote(status, CallStatus, CallDuration),
-        summary: TranscriptionText ? 
-          `📊 Transcript captured (${TranscriptionText.length} characters): ${TranscriptionText.substring(0, 150)}...` : 
-          'Call captured - transcript processing',
-        transcript: TranscriptionText || null, // Store FULL transcript as-is
-        twilioCallSid: CallSid,
-        direction: Direction,
-        recordingUrl: RecordingUrl || null,
-        isFromTwilio: true,
-        aiPrompt: null,
-      } as any;
-
-      // **STORE RAW CALL DATA**
-      const result = await storage.createCall(callData);
-      console.log(`✅ USER3 RAW DATA: Raw call record created for user 3: ${CallSid}`);
-
-      // **LOG RAW DATA COLLECTION RESULTS**
-      console.log(`📋 USER3 RAW DATA: Call processed without AI:`, {
-        userId: userId,
-        phoneNumber: phoneNumber,
+        callSid: CallSid,
         status: status,
         direction: Direction,
-        twilioCallSid: CallSid,
         hasTranscript: !!TranscriptionText,
         transcriptLength: TranscriptionText ? TranscriptionText.length : 0,
         hasRecording: !!RecordingUrl,
         recordingUrl: RecordingUrl,
-        fullWebhookData: JSON.stringify(webhookData, null, 2)
+        transcriptionStatus: TranscriptionStatus,
+        isUpdate: !!existingCall,
+        timestamp: new Date().toISOString()
       });
 
-      // Broadcast real-time call update to connected clients for user 3
+      // **BROADCAST REAL-TIME UPDATE**
       try {
-        const broadcastData = {
-          type: 'call_update',
-          userId: userId,
-          call: {
-            ...result,
-            status: result.status || status,
-            isLive: result.status === 'in-progress'
-          },
-          timestamp: new Date().toISOString()
-        };
+        const updatedCall = await storage.getCallByTwilioSid(CallSid);
+        if (updatedCall) {
+          const broadcastData = {
+            type: 'call_update',
+            userId: userId,
+            call: {
+              ...updatedCall,
+              status: updatedCall.status || status,
+              isLive: updatedCall.status === 'in-progress'
+            },
+            timestamp: new Date().toISOString()
+          };
 
-        const clientCount = wsManager.broadcastToUser(userId, broadcastData);
-        console.log(`📡 USER3 RAW DATA: Broadcasted raw call update to ${clientCount} connected clients`);
+          const clientCount = wsManager.broadcastToUser(userId, broadcastData);
+          console.log(`📡 USER3 ENHANCED: Broadcasted enhanced call update to ${clientCount} connected clients`);
+        }
       } catch (error) {
-        console.error('❌ USER3 RAW DATA: Error broadcasting call update:', error);
+        console.error('❌ USER3 ENHANCED: Error broadcasting call update:', error);
       }
 
     } catch (error) {
-      console.error('❌ USER3 RAW DATA: Error processing webhook for user 3:', error);
+      console.error('❌ USER3 ENHANCED: Error processing enhanced webhook for user 3:', error);
     }
   }
 

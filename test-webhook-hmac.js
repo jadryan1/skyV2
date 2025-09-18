@@ -28,7 +28,7 @@ async function testWebhookWithHMAC() {
     
     // Generate HMAC signature (simulating Twilio's signature)
     const webhookUrl = 'https://skyiq.app/api/twilio/webhook/user3';
-    const authToken = 'test_auth_token_for_hmac'; // In real scenario, this would be user's Twilio auth token
+    const authToken = process.env.USER3_TWILIO_AUTH_TOKEN || 'test_auth_token_for_hmac';
     
     // Create the signature string (URL + POST body)
     const signatureString = webhookUrl + formData;
