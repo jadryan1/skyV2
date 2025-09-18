@@ -93,32 +93,32 @@ app.use((req, res, next) => {
   try {
     log('🚀 Starting server initialization...');
     const server = await registerRoutes(app);
-  
+
   // Setup WebSocket server alongside Express
   const wss = new WebSocketServer({ server });
-  
+
   wss.on('connection', (ws: WebSocketClient, req) => {
     log('New WebSocket connection established');
-    
+
     // Initialize client properties
     ws.isAlive = true;
     wsManager.addClient(ws);
-    
+
     // Handle pong responses
     ws.on('pong', () => {
       ws.isAlive = true;
     });
-    
+
     // SECURITY: Handle incoming messages with authentication verification
     ws.on('message', async (data: WebSocket.Data) => {
       try {
         const message = JSON.parse(data.toString());
-        
+
         if (message.type === 'subscribe' && message.userId && message.token) {
           // SECURITY: Verify user authentication before allowing subscription
           const userId = parseInt(message.userId);
           const token = message.token;
-          
+
           // Basic token validation - in a real app this would verify JWT or session
           // For now, we'll validate that the userId matches what's stored in localStorage
           // TODO: Implement proper JWT verification or session validation
@@ -131,7 +131,7 @@ app.use((req, res, next) => {
             }));
             return;
           }
-          
+
           // SECURITY: Verify user exists and token is valid
           try {
             const { storage } = await import('./storage');
@@ -145,11 +145,11 @@ app.use((req, res, next) => {
               }));
               return;
             }
-            
+
             // SECURITY: Set userId only after successful authentication
             ws.userId = userId;
             log(`WebSocket client authenticated and subscribed for user ${ws.userId}`);
-            
+
             // Send confirmation with user verification
             ws.send(JSON.stringify({
               type: 'subscription_confirmed',
@@ -189,31 +189,31 @@ app.use((req, res, next) => {
         }));
       }
     });
-    
+
     // Handle client disconnect
     ws.on('close', () => {
       log(`WebSocket client disconnected ${ws.userId ? `(user ${ws.userId})` : ''}`);
       wsManager.removeClient(ws);
     });
-    
+
     // Handle WebSocket errors
     ws.on('error', (error) => {
       log(`WebSocket error: ${error}`);
       wsManager.removeClient(ws);
     });
   });
-  
+
   // Ping clients every 30 seconds to keep connections alive
   const pingInterval = setInterval(() => {
     wsManager.cleanup();
   }, 30000);
-  
+
   // Cleanup on server shutdown
   process.on('SIGINT', () => {
     clearInterval(pingInterval);
     wss.close();
   });
-  
+
   log(`WebSocket server initialized. Ready for real-time call updates.`);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -221,7 +221,7 @@ app.use((req, res, next) => {
     const message = err.message || "Internal Server Error";
 
     console.error("Express error handler:", err);
-    
+
     if (!res.headersSent) {
       res.status(status).json({ message });
     }
@@ -245,10 +245,10 @@ app.use((req, res, next) => {
   // Optimize SSL certificate loading - use HTTP for faster startup in development
   // SSL can be handled by reverse proxy in production
   let serverInstance;
-  
+
   // Disable SSL for faster startup - deployment environments handle SSL via reverse proxy
   const useSSL = false;
-  
+
   if (useSSL) {
     const certPath = path.join(process.cwd(), 'attached_assets', 'domain.cert_1756860116174.pem');
     const keyPath = path.join(process.cwd(), 'attached_assets', 'private.key_1756860116174.pem');
@@ -290,17 +290,17 @@ app.use((req, res, next) => {
     log(`serving on port ${port}`);
     log('✅ Server startup completed successfully');
   });
-  
+
   } catch (error) {
     console.error('❌ Critical server startup error:', error);
     console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace available');
-    
+
     // Log detailed error information for debugging
     if (error instanceof Error) {
       console.error('Error name:', error.name);
       console.error('Error message:', error.message);
     }
-    
+
     // Give the system a moment to flush logs before exiting
     setTimeout(() => {
       console.error('🚫 Server startup failed. Exiting with error code 1.');
@@ -310,7 +310,7 @@ app.use((req, res, next) => {
 })().catch((unhandledError) => {
   console.error('💥 Unhandled async error during server startup:', unhandledError);
   console.error('Stack trace:', unhandledError instanceof Error ? unhandledError.stack : 'No stack trace available');
-  
+
   setTimeout(() => {
     console.error('🚫 Critical failure. Exiting with error code 1.');
     process.exit(1);
