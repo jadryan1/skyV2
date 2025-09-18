@@ -1014,79 +1014,60 @@ export default function CallDashboard() {
                             </TableCell>
                           </TableRow>
                           
-                          {/* Collapsible Transcript Row */}
+                          {/* RAW TRANSCRIPT DISPLAY - No AI Processing */}
                           {expandedTranscripts.has(call.id) && call.transcript && (
                             <TableRow className="bg-gray-50 dark:bg-gray-800/50">
                               <TableCell colSpan={8} className="p-0">
                                 <div className="p-6">
                                   <div className="max-w-none bg-white dark:bg-gray-800 rounded-lg border">
-                                    {/* Call Summary Section */}
-                                    <div className="bg-blue-50 dark:bg-blue-900/20 p-4 border-b border-l-4 border-blue-500">
-                                      <h3 className="font-semibold text-blue-600 dark:text-blue-400 mb-2 flex items-center gap-2">
-                                        📊 AI Summary
+                                    {/* Raw Call Data Header */}
+                                    <div className="bg-green-50 dark:bg-green-900/20 p-4 border-b border-l-4 border-green-500">
+                                      <h3 className="font-semibold text-green-600 dark:text-green-400 mb-2 flex items-center gap-2">
+                                        🔴 RAW CALL DATA (No AI Processing)
                                       </h3>
-                                      <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
-                                        {call.summary}
-                                      </p>
-                                    </div>
-
-                                    {/* Transcript Content */}
-                                    <div className="p-4">
-                                      <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-4 flex items-center gap-2">
-                                        <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                                        Conversation Transcript
-                                      </h3>
-                                      
-                                      <div className="space-y-3 max-h-96 overflow-y-auto">
-                                        {call.transcript.split('\n').filter((line: string) => line.trim()).map((line: string, index: number) => {
-                                          const isCustomer = line.toLowerCase().includes('customer:') || line.toLowerCase().includes('caller:');
-                                          const isAgent = line.toLowerCase().includes('agent:') || line.toLowerCase().includes('assistant:');
-                                          
-                                          // Remove speaker prefixes for cleaner display
-                                          const cleanLine = line.replace(/^(customer:|caller:|agent:|assistant:)\s*/i, '');
-                                          
-                                          if (isCustomer) {
-                                            return (
-                                              <div key={index} className="flex items-start gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                                                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-medium shrink-0">
-                                                  C
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                  <div className="text-sm font-medium text-blue-600 dark:text-blue-400 mb-1">Customer</div>
-                                                  <p className="text-gray-800 dark:text-gray-200 leading-relaxed">{cleanLine}</p>
-                                                </div>
-                                              </div>
-                                            );
-                                          } else if (isAgent) {
-                                            return (
-                                              <div key={index} className="flex items-start gap-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                                                <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-sm font-medium shrink-0">
-                                                  A
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                  <div className="text-sm font-medium text-green-600 dark:text-green-400 mb-1">Assistant</div>
-                                                  <p className="text-gray-800 dark:text-gray-200 leading-relaxed">{cleanLine}</p>
-                                                </div>
-                                              </div>
-                                            );
-                                          } else if (cleanLine.trim()) {
-                                            return (
-                                              <div key={index} className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                                                <div className="w-8 h-8 bg-gray-400 rounded-full flex items-center justify-center text-white text-sm font-medium shrink-0">
-                                                  •
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                  <p className="text-gray-700 dark:text-gray-300 leading-relaxed italic">{cleanLine}</p>
-                                                </div>
-                                              </div>
-                                            );
-                                          }
-                                          return null;
-                                        })}
+                                      <div className="grid grid-cols-2 gap-4 text-sm">
+                                        <div>
+                                          <strong>Call SID:</strong> {call.twilioCallSid || 'N/A'}
+                                        </div>
+                                        <div>
+                                          <strong>Direction:</strong> {call.direction || 'N/A'}
+                                        </div>
+                                        <div>
+                                          <strong>Source:</strong> {call.isFromTwilio ? '🔗 Twilio Webhook' : '✍️ Manual Entry'}
+                                        </div>
+                                        <div>
+                                          <strong>Transcript Length:</strong> {call.transcript.length} characters
+                                        </div>
                                       </div>
                                     </div>
 
-                                    {/* Call Notes Section */}
+                                    {/* Full Raw Transcript */}
+                                    <div className="p-4">
+                                      <h3 className="font-semibold text-gray-800 dark:text-gray-200 mb-4 flex items-center gap-2">
+                                        <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                                        Complete Raw Transcript
+                                      </h3>
+                                      
+                                      <div className="bg-gray-100 dark:bg-gray-900 p-4 rounded-lg border font-mono text-sm max-h-96 overflow-y-auto">
+                                        <pre className="whitespace-pre-wrap break-words text-gray-800 dark:text-gray-200">
+                                          {call.transcript}
+                                        </pre>
+                                      </div>
+                                    </div>
+
+                                    {/* Call Summary */}
+                                    {call.summary && (
+                                      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 border-t border-l-4 border-blue-500">
+                                        <h3 className="font-semibold text-blue-600 dark:text-blue-400 mb-2 flex items-center gap-2">
+                                          📋 Call Summary
+                                        </h3>
+                                        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
+                                          {call.summary}
+                                        </p>
+                                      </div>
+                                    )}
+
+                                    {/* Call Notes */}
                                     {call.notes && (
                                       <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 border-t border-l-4 border-yellow-500">
                                         <h3 className="font-semibold text-yellow-600 dark:text-yellow-400 mb-2 flex items-center gap-2">
@@ -1098,33 +1079,87 @@ export default function CallDashboard() {
                                       </div>
                                     )}
 
+                                    {/* Recording Info */}
+                                    {call.recordingUrl && (
+                                      <div className="bg-purple-50 dark:bg-purple-900/20 p-4 border-t border-l-4 border-purple-500">
+                                        <h3 className="font-semibold text-purple-600 dark:text-purple-400 mb-2 flex items-center gap-2">
+                                          🎵 Recording Available
+                                        </h3>
+                                        <p className="text-sm text-gray-600 dark:text-gray-400 break-all">
+                                          {call.recordingUrl}
+                                        </p>
+                                      </div>
+                                    )}
+
                                     {/* Action Buttons */}
-                                    <div className="p-4 border-t bg-gray-50 dark:bg-gray-800 flex justify-end gap-2">
-                                      <Button 
-                                        variant="outline" 
-                                        size="sm"
-                                        onClick={() => {
-                                          const transcript = `CALL TRANSCRIPT\\n===================\\nDate: ${call.date}\\nTime: ${call.time}\\nDuration: ${call.duration}\\nContact: ${call.name || call.number}\\n\\nSUMMARY:\\n${call.summary}\\n\\nTRANSCRIPT:\\n${call.transcript}\\n\\nNOTES:\\n${call.notes || 'No additional notes'}`;
-                                          const blob = new Blob([transcript], { type: 'text/plain' });
-                                          const url = URL.createObjectURL(blob);
-                                          const a = document.createElement('a');
-                                          a.href = url;
-                                          a.download = `transcript-${call.name || call.number}-${new Date().toISOString().split('T')[0]}.txt`;
-                                          document.body.appendChild(a);
-                                          a.click();
-                                          document.body.removeChild(a);
-                                          URL.revokeObjectURL(url);
-                                        }}
-                                      >
-                                        📄 Download
-                                      </Button>
-                                      <Button 
-                                        variant="outline" 
-                                        size="sm"
-                                        onClick={() => toggleTranscript(call.id)}
-                                      >
-                                        ⬆️ Collapse
-                                      </Button>
+                                    <div className="p-4 border-t bg-gray-50 dark:bg-gray-800 flex justify-between items-center">
+                                      <div className="text-xs text-gray-500">
+                                        Collected: {call.createdAt ? new Date(call.createdAt).toLocaleString() : 'Unknown'}
+                                      </div>
+                                      <div className="flex gap-2">
+                                        <Button 
+                                          variant="outline" 
+                                          size="sm"
+                                          onClick={() => {
+                                            const fullData = `RAW CALL DATA EXPORT
+===========================================
+Call ID: ${call.id}
+Twilio Call SID: ${call.twilioCallSid || 'N/A'}
+Phone Number: ${call.phoneNumber || call.number}
+Contact: ${call.contactName || call.name || 'Unknown'}
+Date: ${call.createdAt ? new Date(call.createdAt).toLocaleDateString() : call.date}
+Time: ${call.createdAt ? new Date(call.createdAt).toLocaleTimeString() : call.time}
+Duration: ${call.duration ? (typeof call.duration === 'number' ? `${Math.floor(call.duration / 60)}m ${call.duration % 60}s` : call.duration) : 'N/A'}
+Direction: ${call.direction || 'N/A'}
+Status: ${call.status || 'Unknown'}
+Source: ${call.isFromTwilio ? 'Twilio Webhook' : 'Manual Entry'}
+Recording URL: ${call.recordingUrl || 'N/A'}
+
+SUMMARY:
+${call.summary || 'No summary'}
+
+FULL RAW TRANSCRIPT (${call.transcript.length} characters):
+${call.transcript}
+
+NOTES:
+${call.notes || 'No notes'}
+
+EXPORT TIMESTAMP: ${new Date().toISOString()}
+`;
+                                            const blob = new Blob([fullData], { type: 'text/plain' });
+                                            const url = URL.createObjectURL(blob);
+                                            const a = document.createElement('a');
+                                            a.href = url;
+                                            a.download = `raw-call-data-${call.twilioCallSid || call.id}-${new Date().toISOString().split('T')[0]}.txt`;
+                                            document.body.appendChild(a);
+                                            a.click();
+                                            document.body.removeChild(a);
+                                            URL.revokeObjectURL(url);
+                                          }}
+                                        >
+                                          📄 Export Raw Data
+                                        </Button>
+                                        <Button 
+                                          variant="outline" 
+                                          size="sm"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(call.transcript);
+                                            toast({
+                                              title: "Transcript Copied",
+                                              description: "Full transcript copied to clipboard",
+                                            });
+                                          }}
+                                        >
+                                          📋 Copy Transcript
+                                        </Button>
+                                        <Button 
+                                          variant="outline" 
+                                          size="sm"
+                                          onClick={() => toggleTranscript(call.id)}
+                                        >
+                                          ⬆️ Collapse
+                                        </Button>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>

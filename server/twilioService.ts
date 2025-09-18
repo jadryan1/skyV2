@@ -4,34 +4,23 @@ import type { InsertCall, User } from '@shared/schema';
 import { wsManager } from './index';
 import { buildPrompt } from './promptBuilder'; // ✅ new import
 
-// Import with fallback to prevent crashes if services are missing
-let PhoneValidationService: any;
-let aiService: any;
+// AI and validation services DISABLED - focusing on raw call data
+console.log('🚫 AI and validation services DISABLED for raw call data collection');
 
-try {
-  PhoneValidationService = require('./phoneValidation').PhoneValidationService;
-} catch (error) {
-  console.warn('PhoneValidationService not available, using basic validation');
-  PhoneValidationService = {
-    validatePhoneNumber: (phone: string) => ({
-      isValid: true,
-      isTestNumber: false,
-      normalizedNumber: phone,
-      reason: 'service_unavailable'
-    }),
-    logValidation: () => {}
-  };
-}
+const PhoneValidationService = {
+  validatePhoneNumber: (phone: string) => ({
+    isValid: true,
+    isTestNumber: false,
+    normalizedNumber: phone,
+    reason: 'validation_disabled'
+  }),
+  logValidation: () => {}
+};
 
-try {
-  aiService = require('./aiService').aiService;
-} catch (error) {
-  console.warn('aiService not available, skipping AI analysis');
-  aiService = {
-    analyzeTranscriptAuthenticity: () => Promise.resolve({ isRealTranscript: false, reason: 'service_unavailable' }),
-    analyzeCall: () => Promise.resolve(null)
-  };
-}
+const aiService = {
+  analyzeTranscriptAuthenticity: () => Promise.resolve({ isRealTranscript: true, reason: 'ai_disabled' }),
+  analyzeCall: () => Promise.resolve(null)
+};
 
 export class TwilioService {
   constructor() {}
@@ -253,24 +242,11 @@ export class TwilioService {
   }
 
   /**
-   * PASSIVE Enhanced webhook processor for user 3 with phone validation and AI-powered call intelligence
-   * Validates phone numbers and processes calls with OpenAI-powered insights
-   * Rejects test/fake numbers and only processes legitimate call data
+   * RAW DATA COLLECTION: Simple webhook processor for user 3 - NO AI, NO FILTERING
+   * Captures ALL call data including full transcripts without any processing
    * IMPORTANT: This is purely for data collection and does not affect active calls
    */
   async processUser3CallWebhookEnhanced(webhookData: any): Promise<void> {
-    try {
-      console.log(`📊 USER3 PASSIVE COLLECTION: Processing intelligent webhook for user 3 - CallSid: ${CallSid}`);
-      console.log(`📞 USER3 PASSIVE COLLECTION: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
-
-      // Only process calls that are definitely completed to avoid interfering with active calls
-      if (CallStatus && ['in-progress', 'ringing', 'queued'].includes(CallStatus.toLowerCase())) {
-        console.log(`📊 USER3 PASSIVE COLLECTION: Skipping processing for active call status: ${CallStatus}`);
-        return;
-      }
-    } catch (error) {
-      console.error('❌ USER3 AI ENHANCED: Error processing intelligent webhook for user 3:', error);
-    }
     try {
       const {
         CallSid,
@@ -284,151 +260,60 @@ export class TwilioService {
         TranscriptionUrl
       } = webhookData;
 
+      console.log(`📊 USER3 RAW DATA: Processing webhook for user 3 - CallSid: ${CallSid}`);
+      console.log(`📞 USER3 RAW DATA: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
+      console.log(`📝 USER3 RAW DATA: Full transcript length: ${TranscriptionText ? TranscriptionText.length : 0} chars`);
+
       // Hardcode userId to 3 - bypass phone number matching
       const userId = 3;
 
       // Get user 3 to verify they exist
       const user = await storage.getUser(userId);
       if (!user) {
-        console.log(`❌ USER3 AI ENHANCED: User 3 not found in database`);
+        console.log(`❌ USER3 RAW DATA: User 3 not found in database`);
         return;
       }
 
-      // Extract phone number based on direction - key requirement for validation!
+      // Extract phone number based on direction
       const phoneNumber = Direction === 'inbound' ? From : To;
-
-      // **CRITICAL: Validate phone number for legitimacy** (with error handling)
-      let phoneValidation;
-      try {
-        phoneValidation = PhoneValidationService.validatePhoneNumber(phoneNumber);
-        PhoneValidationService.logValidation(phoneNumber, phoneValidation, 'webhook');
-      } catch (error) {
-        console.error(`❌ USER3 WEBHOOK: Phone validation error for ${phoneNumber}:`, error);
-        // Use basic validation if service fails
-        phoneValidation = {
-          isValid: true,
-          isTestNumber: false,
-          normalizedNumber: phoneNumber,
-          reason: 'validation_service_failed'
-        };
-      }
-
-      // **REJECT TEST/FAKE NUMBERS**
-      if (!phoneValidation.isValid || phoneValidation.isTestNumber) {
-        console.warn(`⚠️ USER3 AI ENHANCED: REJECTING call from ${phoneNumber} - ${phoneValidation.reason}`);
-        console.warn(`📊 USER3 AI ENHANCED: CALL REJECTED - Not storing test/fake number data`);
-        return; // Exit early - do not process or store fake data
-      }
-
-      console.log(`✅ USER3 AI ENHANCED: Phone number ${phoneNumber} validated as legitimate`);
-
-      // Check if transcript is available and authentic
-      let transcriptAnalysis = null;
-      let aiAnalysis = null;
-      let intelligentSummary = null;
-      let suggestedContactName = null;
-
-      if (TranscriptionText && TranscriptionText.trim()) {
-        console.log(`📝 USER3 AI ENHANCED: Analyzing transcript: ${TranscriptionText.substring(0, 100)}...`);
-
-        try {
-          // **AI-POWERED TRANSCRIPT VALIDATION**
-          transcriptAnalysis = await aiService.analyzeTranscriptAuthenticity(TranscriptionText);
-
-          if (!transcriptAnalysis.isRealTranscript) {
-            console.warn(`⚠️ USER3 AI ENHANCED: REJECTING fake/test transcript - ${transcriptAnalysis.reason}`);
-            console.warn(`📊 USER3 AI ENHANCED: TRANSCRIPT REJECTED - Not processing fake transcript data`);
-            // Continue processing the call but without transcript data
-          } else {
-            console.log(`✅ USER3 AI ENHANCED: Transcript validated as authentic (confidence: ${transcriptAnalysis.confidence})`);
-
-            try {
-              // **AI-POWERED CALL ANALYSIS**
-              const businessInfo = await storage.getBusinessInfo(userId);
-              aiAnalysis = await aiService.analyzeCall(TranscriptionText, businessInfo);
-
-              if (aiAnalysis) {
-                console.log(`🤖 USER3 AI ENHANCED: AI analysis completed - Sentiment: ${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}/5)`);
-                console.log(`💡 USER3 AI ENHANCED: Call purpose: ${aiAnalysis.callPurpose}`);
-                console.log(`📋 USER3 AI ENHANCED: Key points: ${aiAnalysis.keyPoints.length} identified`);
-
-                intelligentSummary = aiAnalysis.summary;
-                suggestedContactName = aiAnalysis.suggestedContactName;
-              }
-            } catch (analysisError) {
-              console.error(`❌ USER3 AI ENHANCED: Call analysis failed:`, analysisError);
-              // Continue without AI analysis
-            }
-          }
-        } catch (transcriptError) {
-          console.error(`❌ USER3 AI ENHANCED: Transcript validation failed:`, transcriptError);
-          // Continue processing the call but without transcript analysis
-        }
-      } else {
-        console.log(`📝 USER3 AI ENHANCED: No transcript available for AI analysis`);
-      }
-
-      // Fetch business info and previous calls for context
-      const businessInfo = await storage.getBusinessInfo(userId);
-      const userCalls = await storage.getCallsByUserId(userId);
-
-      // Generate business-specific prompt for user 3
-      const prompt = buildPrompt(businessInfo, userCalls);
 
       // Map Twilio status to our status enum
       const status = this.mapTwilioStatus(CallStatus);
 
-      // **CREATE INTELLIGENT CALL RECORD**
+      // **CREATE RAW CALL RECORD - NO AI PROCESSING**
       const callData: InsertCall = {
         userId: userId,
-        phoneNumber: phoneValidation.normalizedNumber || phoneNumber, // Use validated/normalized number
-        contactName: suggestedContactName, // AI-suggested contact name
+        phoneNumber: phoneNumber,
+        contactName: null, // No AI suggestion
         duration: CallDuration ? parseInt(CallDuration) : null,
         status,
-        notes: aiAnalysis ?
-          `${this.getCallStatusNote(status, CallStatus, CallDuration)} | AI Quality: ${aiAnalysis.callQuality} | Follow-up: ${aiAnalysis.followUpRequired ? 'Required' : 'None'}` :
-          this.getCallStatusNote(status, CallStatus, CallDuration),
-        summary: intelligentSummary, // AI-generated summary
-        transcript: transcriptAnalysis?.isRealTranscript ? TranscriptionText : null, // Only store real transcripts
+        notes: this.getCallStatusNote(status, CallStatus, CallDuration),
+        summary: TranscriptionText ? `📊 Raw call data captured: ${TranscriptionText.substring(0, 200)}...` : 'Call captured without transcript',
+        transcript: TranscriptionText || null, // Store FULL transcript as-is
         twilioCallSid: CallSid,
         direction: Direction,
         recordingUrl: RecordingUrl || null,
         isFromTwilio: true,
-        // Save generated prompt in the DB
-        aiPrompt: prompt,
+        aiPrompt: null,
       } as any;
 
-      // **STORE VALIDATED AND PROCESSED CALL DATA**
+      // **STORE RAW CALL DATA**
       const result = await storage.createCall(callData);
-      console.log(`✅ USER3 AI ENHANCED: Intelligent call record created for user 3: ${CallSid}`);
+      console.log(`✅ USER3 RAW DATA: Raw call record created for user 3: ${CallSid}`);
 
-      // **LOG COMPREHENSIVE PROCESSING RESULTS**
-      console.log(`📋 USER3 AI ENHANCED: Call processed with intelligence:`, {
+      // **LOG RAW DATA COLLECTION RESULTS**
+      console.log(`📋 USER3 RAW DATA: Call processed without AI:`, {
         userId: userId,
-        phoneNumber: phoneValidation.normalizedNumber || phoneNumber,
-        phoneValidation: phoneValidation.isValid,
+        phoneNumber: phoneNumber,
         status: status,
         direction: Direction,
         twilioCallSid: CallSid,
-        hasValidTranscript: !!transcriptAnalysis?.isRealTranscript,
-        hasAIAnalysis: !!aiAnalysis,
-        aiSentiment: aiAnalysis?.sentiment,
-        aiQuality: aiAnalysis?.callQuality,
-        suggestedName: suggestedContactName,
-        hasRecording: !!RecordingUrl
+        hasTranscript: !!TranscriptionText,
+        transcriptLength: TranscriptionText ? TranscriptionText.length : 0,
+        hasRecording: !!RecordingUrl,
+        recordingUrl: RecordingUrl,
+        fullWebhookData: JSON.stringify(webhookData, null, 2)
       });
-
-      // **AI INSIGHTS LOGGING**
-      if (aiAnalysis) {
-        console.log(`🧠 USER3 AI ENHANCED: Business insights generated:`, {
-          callPurpose: aiAnalysis.callPurpose,
-          sentiment: `${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}/5)`,
-          keyPointsCount: aiAnalysis.keyPoints.length,
-          actionItemsCount: aiAnalysis.actionItems.length,
-          businessInsightsCount: aiAnalysis.businessRelevantInsights.length,
-          followUpRequired: aiAnalysis.followUpRequired
-        });
-      }
 
       // Broadcast real-time call update to connected clients for user 3
       try {
@@ -438,27 +323,19 @@ export class TwilioService {
           call: {
             ...result,
             status: result.status || status,
-            isLive: result.status === 'in-progress',
-            // Include AI analysis data for real-time updates
-            aiInsights: aiAnalysis ? {
-              sentiment: aiAnalysis.sentiment,
-              sentimentScore: aiAnalysis.sentimentScore,
-              callPurpose: aiAnalysis.callPurpose,
-              callQuality: aiAnalysis.callQuality,
-              followUpRequired: aiAnalysis.followUpRequired
-            } : null
+            isLive: result.status === 'in-progress'
           },
           timestamp: new Date().toISOString()
         };
 
         const clientCount = wsManager.broadcastToUser(userId, broadcastData);
-        console.log(`📡 USER3 AI ENHANCED: Broadcasted intelligent call update to ${clientCount} connected clients`);
+        console.log(`📡 USER3 RAW DATA: Broadcasted raw call update to ${clientCount} connected clients`);
       } catch (error) {
-        console.error('❌ USER3 AI ENHANCED: Error broadcasting intelligent call update:', error);
+        console.error('❌ USER3 RAW DATA: Error broadcasting call update:', error);
       }
 
     } catch (error) {
-      console.error('❌ USER3 AI ENHANCED: Error processing intelligent webhook for user 3:', error);
+      console.error('❌ USER3 RAW DATA: Error processing webhook for user 3:', error);
     }
   }
 

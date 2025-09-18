@@ -9,6 +9,13 @@ import WebSocket, { WebSocketServer } from "ws";
 
 // SSL certificate has been updated - normal TLS validation restored
 
+// CONFIGURATION: AI SERVICES DISABLED FOR RAW DATA COLLECTION
+console.log('🚫 ==========================================');
+console.log('🚫 AI SERVICES DISABLED');
+console.log('🚫 RAW CALL DATA COLLECTION MODE ACTIVE');
+console.log('🚫 NO PROCESSING, FILTERING, OR AI ANALYSIS');
+console.log('🚫 ==========================================');
+
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
