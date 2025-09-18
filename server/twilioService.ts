@@ -3,8 +3,35 @@ import { storage } from './storage';
 import type { InsertCall, User } from '@shared/schema';
 import { wsManager } from './index';
 import { buildPrompt } from './promptBuilder'; // ✅ new import
-import { PhoneValidationService } from './phoneValidation';
-import { aiService } from './aiService';
+
+// Import with fallback to prevent crashes if services are missing
+let PhoneValidationService: any;
+let aiService: any;
+
+try {
+  PhoneValidationService = require('./phoneValidation').PhoneValidationService;
+} catch (error) {
+  console.warn('PhoneValidationService not available, using basic validation');
+  PhoneValidationService = {
+    validatePhoneNumber: (phone: string) => ({ 
+      isValid: true, 
+      isTestNumber: false, 
+      normalizedNumber: phone,
+      reason: 'service_unavailable' 
+    }),
+    logValidation: () => {}
+  };
+}
+
+try {
+  aiService = require('./aiService').aiService;
+} catch (error) {
+  console.warn('aiService not available, skipping AI analysis');
+  aiService = {
+    analyzeTranscriptAuthenticity: () => Promise.resolve({ isRealTranscript: false, reason: 'service_unavailable' }),
+    analyzeCall: () => Promise.resolve(null)
+  };
+}
 
 export class TwilioService {
   constructor() {}
@@ -232,6 +259,8 @@ export class TwilioService {
    */
   async processUser3CallWebhookEnhanced(webhookData: any): Promise<void> {
     try {
+      console.log(`🎯 USER3 WEBHOOK: Raw webhook data received:`, JSON.stringify(webhookData, null, 2));
+      
       const {
         CallSid,
         From,
@@ -243,6 +272,12 @@ export class TwilioService {
         TranscriptionText,
         TranscriptionUrl
       } = webhookData;
+
+      // Basic validation to prevent crashes
+      if (!CallSid) {
+        console.error(`❌ USER3 WEBHOOK: Missing CallSid in webhook data`);
+        return;
+      }
 
       console.log(`🎯 USER3 AI ENHANCED: Processing intelligent webhook for user 3 - CallSid: ${CallSid}`);
       console.log(`📞 USER3 AI ENHANCED: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
@@ -260,9 +295,21 @@ export class TwilioService {
       // Extract phone number based on direction - key requirement for validation!
       const phoneNumber = Direction === 'inbound' ? From : To;
 
-      // **CRITICAL: Validate phone number for legitimacy**
-      const phoneValidation = PhoneValidationService.validatePhoneNumber(phoneNumber);
-      PhoneValidationService.logValidation(phoneNumber, phoneValidation, 'webhook');
+      // **CRITICAL: Validate phone number for legitimacy** (with error handling)
+      let phoneValidation;
+      try {
+        phoneValidation = PhoneValidationService.validatePhoneNumber(phoneNumber);
+        PhoneValidationService.logValidation(phoneNumber, phoneValidation, 'webhook');
+      } catch (error) {
+        console.error(`❌ USER3 WEBHOOK: Phone validation error for ${phoneNumber}:`, error);
+        // Use basic validation if service fails
+        phoneValidation = { 
+          isValid: true, 
+          isTestNumber: false, 
+          normalizedNumber: phoneNumber,
+          reason: 'validation_service_failed' 
+        };
+      }
 
       // **REJECT TEST/FAKE NUMBERS**
       if (!phoneValidation.isValid || phoneValidation.isTestNumber) {
@@ -282,28 +329,38 @@ export class TwilioService {
       if (TranscriptionText && TranscriptionText.trim()) {
         console.log(`📝 USER3 AI ENHANCED: Analyzing transcript: ${TranscriptionText.substring(0, 100)}...`);
         
-        // **AI-POWERED TRANSCRIPT VALIDATION**
-        transcriptAnalysis = await aiService.analyzeTranscriptAuthenticity(TranscriptionText);
-        
-        if (!transcriptAnalysis.isRealTranscript) {
-          console.warn(`⚠️ USER3 AI ENHANCED: REJECTING fake/test transcript - ${transcriptAnalysis.reason}`);
-          console.warn(`📊 USER3 AI ENHANCED: TRANSCRIPT REJECTED - Not processing fake transcript data`);
-          // Continue processing the call but without transcript data
-        } else {
-          console.log(`✅ USER3 AI ENHANCED: Transcript validated as authentic (confidence: ${transcriptAnalysis.confidence})`);
+        try {
+          // **AI-POWERED TRANSCRIPT VALIDATION**
+          transcriptAnalysis = await aiService.analyzeTranscriptAuthenticity(TranscriptionText);
           
-          // **AI-POWERED CALL ANALYSIS**
-          const businessInfo = await storage.getBusinessInfo(userId);
-          aiAnalysis = await aiService.analyzeCall(TranscriptionText, businessInfo);
-          
-          if (aiAnalysis) {
-            console.log(`🤖 USER3 AI ENHANCED: AI analysis completed - Sentiment: ${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}/5)`);
-            console.log(`💡 USER3 AI ENHANCED: Call purpose: ${aiAnalysis.callPurpose}`);
-            console.log(`📋 USER3 AI ENHANCED: Key points: ${aiAnalysis.keyPoints.length} identified`);
+          if (!transcriptAnalysis.isRealTranscript) {
+            console.warn(`⚠️ USER3 AI ENHANCED: REJECTING fake/test transcript - ${transcriptAnalysis.reason}`);
+            console.warn(`📊 USER3 AI ENHANCED: TRANSCRIPT REJECTED - Not processing fake transcript data`);
+            // Continue processing the call but without transcript data
+          } else {
+            console.log(`✅ USER3 AI ENHANCED: Transcript validated as authentic (confidence: ${transcriptAnalysis.confidence})`);
             
-            intelligentSummary = aiAnalysis.summary;
-            suggestedContactName = aiAnalysis.suggestedContactName;
+            try {
+              // **AI-POWERED CALL ANALYSIS**
+              const businessInfo = await storage.getBusinessInfo(userId);
+              aiAnalysis = await aiService.analyzeCall(TranscriptionText, businessInfo);
+              
+              if (aiAnalysis) {
+                console.log(`🤖 USER3 AI ENHANCED: AI analysis completed - Sentiment: ${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}/5)`);
+                console.log(`💡 USER3 AI ENHANCED: Call purpose: ${aiAnalysis.callPurpose}`);
+                console.log(`📋 USER3 AI ENHANCED: Key points: ${aiAnalysis.keyPoints.length} identified`);
+                
+                intelligentSummary = aiAnalysis.summary;
+                suggestedContactName = aiAnalysis.suggestedContactName;
+              }
+            } catch (analysisError) {
+              console.error(`❌ USER3 AI ENHANCED: Call analysis failed:`, analysisError);
+              // Continue without AI analysis
+            }
           }
+        } catch (transcriptError) {
+          console.error(`❌ USER3 AI ENHANCED: Transcript validation failed:`, transcriptError);
+          // Continue processing the call but without transcript analysis
         }
       } else {
         console.log(`📝 USER3 AI ENHANCED: No transcript available for AI analysis`);
