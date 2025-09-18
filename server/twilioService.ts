@@ -1,7 +1,7 @@
 import twilio from 'twilio';
 import { storage } from './storage';
 import type { InsertCall, User } from '@shared/schema';
-import { wsManager } from './index';
+import { wsManager } from './wsManager';
 import { buildPrompt } from './promptBuilder'; // ✅ new import
 
 // AI and validation services DISABLED - focusing on raw call data

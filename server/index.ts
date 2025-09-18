@@ -6,6 +6,7 @@ import fs from "fs";
 import https from "https";
 import http from "http";
 import WebSocket, { WebSocketServer } from "ws";
+import { wsManager, type WebSocketClient } from "./wsManager";
 
 // SSL certificate has been updated - normal TLS validation restored
 
@@ -29,81 +30,6 @@ process.on('uncaughtException', (error) => {
 
 const app = express();
 
-// WebSocket client management
-interface WebSocketClient extends WebSocket {
-  userId?: number;
-  isAlive: boolean;
-}
-
-class WebSocketManager {
-  private clients: Set<WebSocketClient> = new Set();
-  
-  addClient(client: WebSocketClient) {
-    this.clients.add(client);
-    log(`WebSocket client connected. Total clients: ${this.clients.size}`);
-  }
-  
-  removeClient(client: WebSocketClient) {
-    this.clients.delete(client);
-    log(`WebSocket client disconnected. Total clients: ${this.clients.size}`);
-  }
-  
-  broadcastToUser(userId: number, data: any) {
-    const userClients = Array.from(this.clients).filter(client => 
-      client.userId === userId && client.readyState === WebSocket.OPEN
-    );
-    
-    const message = JSON.stringify(data);
-    let sentCount = 0;
-    
-    userClients.forEach(client => {
-      try {
-        client.send(message);
-        sentCount++;
-      } catch (error) {
-        log(`Error sending WebSocket message to user ${userId}: ${error}`);
-        this.removeClient(client);
-      }
-    });
-    
-    log(`Broadcasted call update to ${sentCount} clients for user ${userId}`);
-    return sentCount;
-  }
-  
-  pingClients() {
-    const deadClients: WebSocketClient[] = [];
-    
-    this.clients.forEach(client => {
-      if (!client.isAlive) {
-        deadClients.push(client);
-        return;
-      }
-      
-      client.isAlive = false;
-      client.ping();
-    });
-    
-    // Remove dead clients
-    deadClients.forEach(client => {
-      this.removeClient(client);
-      client.terminate();
-    });
-  }
-  
-  getClientCount(): number {
-    return this.clients.size;
-  }
-  
-  getUserClientCount(userId: number): number {
-    return Array.from(this.clients).filter(client => client.userId === userId).length;
-  }
-}
-
-// Global WebSocket manager instance
-const wsManager = new WebSocketManager();
-
-// Export for use in routes
-export { wsManager };
 
 // SECURITY: Raw body capture middleware for Twilio webhook signature verification
 // This must be before express.json() to capture the raw bytes for specific endpoints
