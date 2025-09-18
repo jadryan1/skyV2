@@ -1,6 +1,7 @@
 import twilio from 'twilio';
 import { storage } from './storage';
 import type { InsertCall, User } from '@shared/schema';
+import { wsManager } from './index';
 import { buildPrompt } from './promptBuilder'; // ✅ new import
 
 export class TwilioService {
@@ -102,9 +103,28 @@ export class TwilioService {
         aiPrompt: prompt,
       } as any; // add `as any` if schema doesn’t yet include aiPrompt
 
-      await storage.createCall(callData);
+      const result = await storage.createCall(callData);
       console.log(`📞 Call logged for user ${user.id}: ${CallSid}`);
       console.log(`📣 Generated prompt: ${prompt}`);
+      
+      // Broadcast real-time call update to connected clients
+      try {
+        const broadcastData = {
+          type: 'call_update',
+          userId: user.id,
+          call: {
+            ...result,
+            status: result.status || status,
+            isLive: result.status === 'in-progress'
+          },
+          timestamp: new Date().toISOString()
+        };
+        
+        const clientCount = wsManager.broadcastToUser(user.id, broadcastData);
+        console.log(`📡 Broadcasted Twilio call to ${clientCount} connected clients for user ${user.id}`);
+      } catch (error) {
+        console.error('Error broadcasting Twilio call update:', error);
+      }
     } catch (error) {
       console.error('Error processing Twilio webhook:', error);
     }
@@ -168,7 +188,7 @@ export class TwilioService {
         aiPrompt: prompt,
       } as any;
 
-      await storage.createCall(callData);
+      const result = await storage.createCall(callData);
       console.log(`✅ USER3 WEBHOOK: Call logged for user 3: ${CallSid}`);
       console.log(`📋 USER3 WEBHOOK: Status: ${CallStatus} -> ${status}, Duration: ${CallDuration}s`);
       console.log(`🤖 USER3 WEBHOOK: Generated prompt: ${prompt}`);
@@ -179,6 +199,25 @@ export class TwilioService {
         direction: Direction,
         twilioCallSid: CallSid
       });
+      
+      // Broadcast real-time call update to connected clients for user 3
+      try {
+        const broadcastData = {
+          type: 'call_update',
+          userId: userId,
+          call: {
+            ...result,
+            status: result.status || status,
+            isLive: result.status === 'in-progress'
+          },
+          timestamp: new Date().toISOString()
+        };
+        
+        const clientCount = wsManager.broadcastToUser(userId, broadcastData);
+        console.log(`📡 USER3 WEBHOOK: Broadcasted call to ${clientCount} connected clients for user 3`);
+      } catch (error) {
+        console.error('❌ USER3 WEBHOOK: Error broadcasting call update:', error);
+      }
     } catch (error) {
       console.error('❌ USER3 WEBHOOK: Error processing Twilio webhook for user 3:', error);
     }
@@ -255,7 +294,7 @@ export class TwilioService {
       // Always create call record - never reject calls
       // If Twilio sends multiple webhooks for same call (status, transcript, recording),
       // each webhook represents valuable data points and should be preserved
-      await storage.createCall(callData);
+      const result = await storage.createCall(callData);
       console.log(`✅ USER3 ENHANCED: Call logged for user 3: ${CallSid}`);
 
       console.log(`📋 USER3 ENHANCED: Status: ${CallStatus} -> ${status}, Duration: ${CallDuration}s`);
@@ -269,6 +308,25 @@ export class TwilioService {
         hasTranscript: !!TranscriptionText,
         hasRecording: !!RecordingUrl
       });
+      
+      // Broadcast real-time call update to connected clients for user 3
+      try {
+        const broadcastData = {
+          type: 'call_update',
+          userId: userId,
+          call: {
+            ...result,
+            status: result.status || status,
+            isLive: result.status === 'in-progress'
+          },
+          timestamp: new Date().toISOString()
+        };
+        
+        const clientCount = wsManager.broadcastToUser(userId, broadcastData);
+        console.log(`📡 USER3 ENHANCED: Broadcasted enhanced call to ${clientCount} connected clients for user 3`);
+      } catch (error) {
+        console.error('❌ USER3 ENHANCED: Error broadcasting enhanced call update:', error);
+      }
     } catch (error) {
       console.error('❌ USER3 ENHANCED: Error processing enhanced Twilio webhook for user 3:', error);
     }
@@ -343,19 +401,22 @@ export class TwilioService {
   }
 
   /**
-   * Map Twilio call status to our enum values - handles ALL call types
+   * Map Twilio call status to our enum values - handles ALL call types with proper in-progress support
    */
-  private mapTwilioStatus(twilioStatus: string): 'completed' | 'missed' | 'failed' {
+  private mapTwilioStatus(twilioStatus: string): 'in-progress' | 'completed' | 'missed' | 'failed' {
     switch (twilioStatus.toLowerCase()) {
+      // Active ongoing calls
+      case 'in-progress':
+      case 'ringing':
+        return 'in-progress';
+      
       // Successful completed calls
       case 'completed':
-      case 'in-progress': // Call is ongoing
         return 'completed';
       
       // Customer/caller ended calls early or didn't answer
       case 'busy':
       case 'no-answer':
-      case 'ringing':
       case 'queued':
         return 'missed';
       

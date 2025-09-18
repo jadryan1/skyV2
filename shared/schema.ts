@@ -7,7 +7,7 @@ import { relations } from "drizzle-orm";
 export const servicePlanEnum = pgEnum('service_plan_enum', ['inbound', 'outbound', 'both']);
 
 // Define call status enum
-export const callStatusEnum = pgEnum('call_status_enum', ['completed', 'missed', 'failed']);
+export const callStatusEnum = pgEnum('call_status_enum', ['in-progress', 'completed', 'missed', 'failed']);
 
 // Users table
 export const users = pgTable("users", {

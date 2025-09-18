@@ -1265,6 +1265,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Twilio webhook endpoints for real-time call tracking
+  
+  // General Twilio webhook endpoint for all users
+  app.post("/api/twilio/webhook", async (req: Request, res: Response) => {
+    try {
+      console.log("📞 Twilio webhook received:", req.body);
+      
+      const { twilioService } = await import("./twilioService");
+      await twilioService.processCallWebhook(req.body);
+      
+      // Return TwiML response for Twilio
+      res.type('text/xml');
+      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    } catch (error) {
+      console.error("Error processing Twilio webhook:", error);
+      res.status(500).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  });
+
+  // Dedicated webhook endpoint for user 3 - captures ALL calls regardless of phone number
+  app.post("/api/twilio/webhook/user3", async (req: Request, res: Response) => {
+    try {
+      console.log("📞 USER3 Twilio webhook received:", req.body);
+      
+      const { twilioService } = await import("./twilioService");
+      await twilioService.processUser3CallWebhookEnhanced(req.body);
+      
+      // Return TwiML response for Twilio
+      res.type('text/xml');
+      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    } catch (error) {
+      console.error("❌ Error processing USER3 Twilio webhook:", error);
+      res.status(500).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  });
+
+  // Twilio recording webhook endpoint
+  app.post("/api/twilio/webhook/recording", async (req: Request, res: Response) => {
+    try {
+      console.log("🎵 Twilio recording webhook received:", req.body);
+      
+      const { twilioService } = await import("./twilioService");
+      await twilioService.processRecordingWebhook(req.body);
+      
+      res.type('text/xml');
+      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    } catch (error) {
+      console.error("Error processing Twilio recording webhook:", error);
+      res.status(500).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  });
+
+  // Twilio transcription webhook endpoint
+  app.post("/api/twilio/webhook/transcription", async (req: Request, res: Response) => {
+    try {
+      console.log("📝 Twilio transcription webhook received:", req.body);
+      
+      const { twilioService } = await import("./twilioService");
+      await twilioService.processTranscriptionWebhook(req.body);
+      
+      res.type('text/xml');
+      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    } catch (error) {
+      console.error("Error processing Twilio transcription webhook:", error);
+      res.status(500).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  });
+
   // Register admin routes for backend Twilio management  
   // (adminRoutes is already imported and used above)
 
