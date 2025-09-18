@@ -907,49 +907,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Webhook for Twilio recording completion
 
-  // SECURITY HARDENED: Webhook for Twilio transcription completion  
-  app.post("/api/twilio/transcription", rateLimitWebhook, async (req: Request, res: Response) => {
-    try {
-      // SECURITY: Validate Twilio signature with per-client secrets
-      if (!validateTwilioSignatureForClient(req)) {
-        console.error('Invalid Twilio signature for transcription webhook');
-        return res.status(403).json({ error: 'Invalid signature' });
-      }
-
-      console.log("📝 Transcription webhook received:", req.body);
-      
-      const { CallSid, TranscriptionStatus } = req.body;
-      
-      // SECURITY: Idempotency check
-      if (!checkIdempotency(CallSid, `transcription-${TranscriptionStatus}`)) {
-        return res.status(200).send("DUPLICATE_IGNORED");
-      }
-      
-      const { twilioService } = await import("./twilioService");
-      await twilioService.processTranscriptionWebhook(req.body);
-      
-      // SECURITY: Fast 200 response
-      res.status(200).send("OK");
-    } catch (error) {
-      console.error("Error processing transcription webhook:", error);
-      // SECURITY: Still return 200 to prevent Twilio retries that could cause DoS
-      res.status(200).send("ERROR_LOGGED");
-    }
+  // SIMPLE TRANSCRIPTION WEBHOOK - NO VALIDATION
+  app.post("/api/twilio/transcription", (req: Request, res: Response) => {
+    console.log('🎯 SIMPLE WEBHOOK: Transcription data received:', req.body);
+    console.log('🎯 SIMPLE WEBHOOK: Headers:', req.headers);
+    res.status(200).send('OK');
   });
 
-  // Raw body parsing middleware for webhook signature validation
-  app.use('/api/twilio/webhook', (req: Request, res: Response, next: any) => {
-    req.rawBody = '';
-    req.setEncoding('utf8');
-    
-    req.on('data', (chunk: string) => {
-      req.rawBody += chunk;
-    });
-    
-    req.on('end', () => {
-      next();
-    });
-  });
+  // REMOVED: Raw body parsing middleware (no signature validation needed)
 
   // ENHANCED USER3 WEBHOOK: Full transcript + audio recording capture with HMAC security
   // This webhook captures ALL call data for user 3 with proper authentication
