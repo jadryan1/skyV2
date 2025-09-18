@@ -31,32 +31,70 @@ const IDEMPOTENCY_TTL = 24 * 60 * 60 * 1000; // 24 hours
 // SECURITY: Twilio webhook signature validation with proper HMAC for user3
 function validateTwilioSignature(req: any, authToken?: string): boolean {
   try {
-    const signature = req.get('X-Twilio-Signature');
+    // Check for different signature headers (Twilio, ElevenLabs, etc.)
+    const twilioSignature = req.get('X-Twilio-Signature');
+    const elevenLabsSignature = req.get('X-ElevenLabs-Signature');
+    const hubSignature = req.get('X-Hub-Signature');
+    
+    const signature = twilioSignature || elevenLabsSignature || hubSignature;
+    
     if (!signature) {
-      console.error('Missing X-Twilio-Signature header');
+      console.error('Missing signature header (X-Twilio-Signature, X-ElevenLabs-Signature, or X-Hub-Signature)');
       return false;
     }
 
     // If we have an auth token, validate the HMAC signature
     if (authToken) {
       const crypto = require('crypto');
-      const url = req.protocol + '://' + req.get('host') + req.originalUrl;
-      const body = new URLSearchParams(req.body).toString();
-      const expectedSignature = crypto
-        .createHmac('sha1', authToken)
-        .update(url + body)
-        .digest('base64');
       
-      const isValid = signature === `${url}=${expectedSignature}`;
-      console.log(`HMAC validation: ${isValid ? 'VALID' : 'INVALID'}`);
-      return isValid;
+      // Handle ElevenLabs-style signatures (sha256=...)
+      if (elevenLabsSignature && elevenLabsSignature.startsWith('sha256=')) {
+        const providedSignature = elevenLabsSignature.replace('sha256=', '');
+        const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+        const expectedSignature = crypto
+          .createHmac('sha256', authToken)
+          .update(body)
+          .digest('hex');
+        
+        const isValid = providedSignature === expectedSignature;
+        console.log(`ElevenLabs HMAC validation: ${isValid ? 'VALID' : 'INVALID'}`);
+        return isValid;
+      }
+      
+      // Handle Hub-style signatures (sha1=...)
+      if (hubSignature && hubSignature.startsWith('sha1=')) {
+        const providedSignature = hubSignature.replace('sha1=', '');
+        const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+        const expectedSignature = crypto
+          .createHmac('sha1', authToken)
+          .update(body)
+          .digest('base64');
+        
+        const isValid = providedSignature === expectedSignature;
+        console.log(`Hub HMAC validation: ${isValid ? 'VALID' : 'INVALID'}`);
+        return isValid;
+      }
+      
+      // Handle Twilio-style signatures (original format)
+      if (twilioSignature) {
+        const url = req.protocol + '://' + req.get('host') + req.originalUrl;
+        const body = new URLSearchParams(req.body).toString();
+        const expectedSignature = crypto
+          .createHmac('sha1', authToken)
+          .update(url + body)
+          .digest('base64');
+        
+        const isValid = twilioSignature === `${url}=${expectedSignature}`;
+        console.log(`Twilio HMAC validation: ${isValid ? 'VALID' : 'INVALID'}`);
+        return isValid;
+      }
     }
 
     // Fallback: just check if signature is present (for testing)
-    console.log('Twilio signature validation: signature present (no auth token)');
+    console.log('Signature validation: signature present (no auth token validation)');
     return true;
   } catch (error) {
-    console.error('Error validating Twilio signature:', error);
+    console.error('Error validating signature:', error);
     return false;
   }
 }
