@@ -35,13 +35,22 @@ const app = express();
 // This must be before express.json() to capture the raw bytes for specific endpoints
 
 // Capture raw body for Twilio webhooks (form-encoded)
-app.use('/api/twilio/', express.raw({ 
-  type: 'application/x-www-form-urlencoded',
-  verify: (req: any, res, buf) => {
-    // Store raw body for signature verification
-    req.rawBody = buf;
-  }
-}));
+app.use('/api/twilio/webhook', (req: any, res, next) => {
+  let rawBody = '';
+  req.setEncoding('utf8');
+
+  req.on('data', (chunk: string) => {
+    rawBody += chunk;
+  });
+
+  req.on('end', () => {
+    req.rawBody = rawBody;
+    // Parse the body manually for Twilio webhooks
+    const urlencoded = new URLSearchParams(rawBody);
+    req.body = Object.fromEntries(urlencoded);
+    next();
+  });
+});
 
 // Capture raw body for ElevenLabs and other JSON webhooks
 app.use('/api/webhook/', express.raw({ 
@@ -62,8 +71,8 @@ app.use('/webhook/', express.raw({
 }));
 
 // Standard JSON parsing for all other routes
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true }));
 
 app.use((req, res, next) => {
   const start = Date.now();

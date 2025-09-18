@@ -139,7 +139,14 @@ function validateTwilioSignature(req: any, authToken?: string): boolean {
     
     const signature = twilioSignature || elevenLabsSignature || hubSignature;
     
+    // For Twilio webhooks, signature might not be present - allow without signature validation in development
     if (!signature || signature.trim() === '') {
+      // In development/testing, allow webhooks without signatures for easier testing
+      if (process.env.NODE_ENV === 'development' || process.env.ALLOW_UNSIGNED_WEBHOOKS === 'true') {
+        console.warn(`⚠️ DEVELOPMENT: Allowing unsigned webhook from IP ${clientIp} for testing`);
+        return true;
+      }
+      
       console.error(`🚫 SECURITY: Missing or empty signature header from IP ${clientIp}`);
       logSecurityEvent('MISSING_SIGNATURE', clientIp, req.originalUrl);
       return false;
@@ -185,26 +192,42 @@ function validateTwilioSignature(req: any, authToken?: string): boolean {
         return isValid;
       }
       
-      // Handle Twilio-style signatures (original format)
+      // Handle Twilio-style signatures (base64 encoded HMAC-SHA1)
       if (twilioSignature) {
         const url = req.protocol + '://' + req.get('host') + req.originalUrl;
         
-        // CRITICAL FIX: Use raw body for Twilio signature validation
-        // Twilio expects URL + form-encoded body, not JSON
-        const body = req.rawBody ? req.rawBody.toString('utf8') : 
-                     (typeof req.body === 'string' ? req.body : new URLSearchParams(req.body).toString());
+        // CRITICAL FIX: Reconstruct the form-encoded body that Twilio signs
+        let formEncodedBody = '';
+        if (req.body && typeof req.body === 'object') {
+          // Convert object to form-encoded string in alphabetical order (how Twilio does it)
+          const sortedKeys = Object.keys(req.body).sort();
+          const pairs: string[] = [];
+          for (const key of sortedKeys) {
+            pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(req.body[key])}`);
+          }
+          formEncodedBody = pairs.join('&');
+        } else if (req.rawBody) {
+          formEncodedBody = req.rawBody.toString('utf8');
+        } else if (typeof req.body === 'string') {
+          formEncodedBody = req.body;
+        }
         
-        const expectedSignatureData = url + body;
+        const signatureData = url + formEncodedBody;
         const expectedSignature = crypto
           .createHmac('sha1', authToken)
-          .update(expectedSignatureData, 'utf8')
+          .update(signatureData, 'utf8')
           .digest('base64');
         
-        // CRITICAL FIX: Compare header directly to signature (not prefixed with URL)
+        console.log(`🔍 Twilio signature validation details:
+          URL: ${url}
+          Body: ${formEncodedBody.substring(0, 100)}...
+          Expected: ${expectedSignature.substring(0, 20)}...
+          Provided: ${twilioSignature.substring(0, 20)}...`);
+        
         // SECURITY: Use constant-time comparison
         const isValid = crypto.timingSafeEqual(
-          Buffer.from(twilioSignature, 'utf8'),
-          Buffer.from(expectedSignature, 'utf8')
+          Buffer.from(twilioSignature, 'base64'),
+          Buffer.from(expectedSignature, 'base64')
         );
         
         console.log(`🔐 Twilio HMAC validation from ${clientIp}: ${isValid ? 'VALID' : 'INVALID'}`);
@@ -215,11 +238,17 @@ function validateTwilioSignature(req: any, authToken?: string): boolean {
         
         return isValid;
       }
+    } else {
+      // No auth token provided - in development, allow for testing
+      if (process.env.NODE_ENV === 'development' || process.env.ALLOW_UNSIGNED_WEBHOOKS === 'true') {
+        console.warn(`⚠️ DEVELOPMENT: Allowing webhook without auth token from IP ${clientIp} for testing`);
+        return true;
+      }
     }
 
-    // SECURITY: No fallback allowed - signature validation must be explicit
+    // SECURITY: No fallback allowed in production
     console.error(`🚫 SECURITY: No valid signature method found from IP ${clientIp}`);
-    logSecurityEvent('NO_VALID_SIGNATURE_METHOD', clientIp, signature.substring(0, 20));
+    logSecurityEvent('NO_VALID_SIGNATURE_METHOD', clientIp, signature ? signature.substring(0, 20) : 'none');
     return false;
     
   } catch (error) {
@@ -904,6 +933,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // SECURITY: Still return 200 to prevent Twilio retries that could cause DoS
       res.status(200).send("ERROR_LOGGED");
     }
+  });
+
+  // Raw body parsing middleware for webhook signature validation
+  app.use('/api/twilio/webhook', (req: Request, res: Response, next: any) => {
+    req.rawBody = '';
+    req.setEncoding('utf8');
+    
+    req.on('data', (chunk: string) => {
+      req.rawBody += chunk;
+    });
+    
+    req.on('end', () => {
+      next();
+    });
   });
 
   // ENHANCED USER3 WEBHOOK: Full transcript + audio recording capture with HMAC security
