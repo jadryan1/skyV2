@@ -928,51 +928,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // REMOVED: Raw body parsing middleware (no signature validation needed)
 
-  // ENHANCED USER3 WEBHOOK: Full transcript + audio recording capture with HMAC security
-  // This webhook captures ALL call data for user 3 with proper authentication
-  app.post("/api/twilio/webhook/user3", rateLimitWebhook, async (req: Request, res: Response) => {
+  // SIMPLE TRANSCRIPT WEBHOOK: Only captures transcript data, no complex processing
+  app.post("/api/twilio/webhook/user3", async (req: Request, res: Response) => {
     try {
-      console.log("🎯 USER3 ENHANCED: Received webhook data for user 3:", JSON.stringify(req.body, null, 2));
-      console.log("🎯 USER3 ENHANCED: Headers:", JSON.stringify(req.headers, null, 2));
+      console.log("📝 TRANSCRIPT WEBHOOK: Raw body received");
       
-      const { CallSid, CallStatus, TranscriptionStatus, TranscriptionText, RecordingUrl, From, To, Direction } = req.body;
+      const { 
+        TranscriptionText, 
+        TranscriptionStatus,
+        CallSid,
+        From,
+        To 
+      } = req.body;
       
-      // SECURITY: Validate HMAC signature for user 3 using per-client validation
-      // Allow bypass in development mode for testing
-      const isValid = process.env.NODE_ENV === 'development' || validateTwilioSignatureForClient(req, '3');
-      if (!isValid) {
-        console.error('🚫 USER3 ENHANCED: Invalid HMAC signature - rejecting request');
-        return res.status(403).json({ error: 'Invalid signature' });
+      // Only process if we have actual transcript data
+      if (TranscriptionText && TranscriptionText.trim()) {
+        console.log("📝 TRANSCRIPT RECEIVED:");
+        console.log(`📞 CallSid: ${CallSid}`);
+        console.log(`📱 From: ${From} → To: ${To}`);
+        console.log(`📝 Status: ${TranscriptionStatus}`);
+        console.log(`💬 Text: ${TranscriptionText}`);
+        
+        // Simple storage - just log to file or database
+        const transcriptData = {
+          timestamp: new Date().toISOString(),
+          callSid: CallSid,
+          from: From,
+          to: To,
+          status: TranscriptionStatus,
+          text: TranscriptionText
+        };
+        
+        // Log to console (or save to file/database as needed)
+        console.log("📄 TRANSCRIPT DATA:", JSON.stringify(transcriptData, null, 2));
+        
+        // Optional: Save to database if you want
+        // await saveTranscriptToDatabase(transcriptData);
+      } else {
+        console.log("📝 TRANSCRIPT WEBHOOK: No transcript text, skipping");
       }
       
-      // Enhanced logging for debugging
-      console.log(`🎯 USER3 ENHANCED: CallSid: ${CallSid}, Status: ${CallStatus}, From: ${From}, To: ${To}, Direction: ${Direction}`);
-      console.log(`📝 USER3 ENHANCED: Transcript: ${TranscriptionText ? `${TranscriptionText.length} chars` : 'None'}`);
-      console.log(`🎵 USER3 ENHANCED: Recording: ${RecordingUrl ? 'Available' : 'None'}`);
+      // Always return 200 to Twilio
+      res.status(200).send("OK");
       
-      // SECURITY: Idempotency check with proper null checks
-      const eventType = TranscriptionStatus ? `transcription-${TranscriptionStatus}` : `call-${CallStatus || 'unknown'}`;
-      if (CallSid && !checkIdempotency(CallSid, eventType)) {
-        console.log(`🎯 USER3 ENHANCED: Duplicate webhook ignored for CallSid: ${CallSid}`);
-        return res.status(200).send("DUPLICATE_IGNORED");
-      }
-      
-      // Process ALL call events to capture complete data
-      const { twilioService } = await import("./twilioService");
-      
-      // **ENHANCED PROCESSING**: Capture full transcripts and audio recordings
-      await twilioService.processUser3CallWebhookEnhanced(req.body);
-      
-      console.log("✅ USER3 ENHANCED: Successfully processed webhook with full data capture");
-      
-      // IMPORTANT: Return 200 with no TwiML content to ensure we don't interfere with calls
-      // This webhook is for data collection only
-      res.status(200).send("DATA_CAPTURED");
     } catch (error) {
-      console.error("❌ USER3 ENHANCED: Error processing webhook for user 3:", error);
-      // SECURITY: Always return 200 to Twilio to avoid retries affecting call flow
-      res.status(200).send("ERROR_LOGGED");
+      console.error("📝 TRANSCRIPT ERROR:", error);
+      res.status(200).send("ERROR_LOGGED"); // Still return 200 to prevent retries
     }
+  });
+
+  // Optional: Even simpler version that just logs everything
+  app.post("/api/twilio/webhook/user3-simple", (req: Request, res: Response) => {
+    console.log("📝 SIMPLE WEBHOOK DATA:", JSON.stringify(req.body, null, 2));
+    res.status(200).send("OK");
   });
 
   // CALL STATUS CHANGES WEBHOOK: Simple endpoint for reliable webhook connectivity verification
