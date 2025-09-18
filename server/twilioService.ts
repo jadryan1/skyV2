@@ -111,6 +111,80 @@ export class TwilioService {
   }
 
   /**
+   * Process incoming Twilio webhook specifically for user 3 - bypasses phone number matching
+   * and captures ALL calls regardless of phone number
+   */
+  async processUser3CallWebhook(webhookData: any): Promise<void> {
+    try {
+      const {
+        CallSid,
+        From,
+        To,
+        CallStatus,
+        CallDuration,
+        Direction,
+        RecordingUrl
+      } = webhookData;
+
+      console.log(`🔍 USER3 WEBHOOK: Processing call data for user 3 - CallSid: ${CallSid}`);
+      console.log(`📞 USER3 WEBHOOK: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
+
+      // Hardcode userId to 3 - bypass phone number matching
+      const userId = 3;
+
+      // Get user 3 to verify they exist
+      const user = await storage.getUser(userId);
+      if (!user) {
+        console.log(`❌ USER3 WEBHOOK: User 3 not found in database`);
+        return;
+      }
+
+      // Fetch business info for user 3 for prompt context
+      const businessInfo = await storage.getBusinessInfo(userId);
+
+      // Fetch user 3's calls for prompt context
+      const userCalls = await storage.getCallsByUserId(userId);
+
+      // Generate business-specific prompt for user 3
+      const prompt = buildPrompt(businessInfo, userCalls);
+
+      // Map Twilio status to our status enum
+      const status = this.mapTwilioStatus(CallStatus);
+
+      // Create call record for user 3
+      const callData: InsertCall = {
+        userId: userId,
+        phoneNumber: Direction === 'inbound' ? From : To,
+        contactName: null,
+        duration: CallDuration ? parseInt(CallDuration) : null,
+        status,
+        notes: this.getCallStatusNote(status, CallStatus, CallDuration),
+        summary: null,
+        twilioCallSid: CallSid,
+        direction: Direction,
+        recordingUrl: RecordingUrl || null,
+        isFromTwilio: true,
+        // Save generated prompt in the DB
+        aiPrompt: prompt,
+      } as any;
+
+      await storage.createCall(callData);
+      console.log(`✅ USER3 WEBHOOK: Call logged for user 3: ${CallSid}`);
+      console.log(`📋 USER3 WEBHOOK: Status: ${CallStatus} -> ${status}, Duration: ${CallDuration}s`);
+      console.log(`🤖 USER3 WEBHOOK: Generated prompt: ${prompt}`);
+      console.log(`📊 USER3 WEBHOOK: Call data created:`, {
+        userId: userId,
+        phoneNumber: Direction === 'inbound' ? From : To,
+        status: status,
+        direction: Direction,
+        twilioCallSid: CallSid
+      });
+    } catch (error) {
+      console.error('❌ USER3 WEBHOOK: Error processing Twilio webhook for user 3:', error);
+    }
+  }
+
+  /**
    * Find user by matching their Twilio phone number with strict isolation
    */
   private async findUserByTwilioNumber(to: string, from: string, direction: string): Promise<User | null> {
