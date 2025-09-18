@@ -205,7 +205,7 @@ app.use((req, res, next) => {
   
   // Ping clients every 30 seconds to keep connections alive
   const pingInterval = setInterval(() => {
-    wsManager.pingClients();
+    wsManager.cleanup();
   }, 30000);
   
   // Cleanup on server shutdown
