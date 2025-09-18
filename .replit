@@ -54,3 +54,6 @@ args = "npm run dev"
 
 [agent]
 integrations = ["javascript_websocket:1.0.0", "javascript_sendgrid:1.0.0", "javascript_openai:1.0.0"]
+
+[objectStorage]
+defaultBucketID = "replit-objstore-512c23c2-ea02-4514-b97b-135abb3a4553"
