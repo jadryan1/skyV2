@@ -5,6 +5,7 @@ import path from "path";
 import fs from "fs";
 import https from "https";
 import http from "http";
+import WebSocket from "ws";
 
 // SSL certificate has been updated - normal TLS validation restored
 
@@ -20,6 +21,82 @@ process.on('uncaughtException', (error) => {
 });
 
 const app = express();
+
+// WebSocket client management
+interface WebSocketClient extends WebSocket {
+  userId?: number;
+  isAlive: boolean;
+}
+
+class WebSocketManager {
+  private clients: Set<WebSocketClient> = new Set();
+  
+  addClient(client: WebSocketClient) {
+    this.clients.add(client);
+    log(`WebSocket client connected. Total clients: ${this.clients.size}`);
+  }
+  
+  removeClient(client: WebSocketClient) {
+    this.clients.delete(client);
+    log(`WebSocket client disconnected. Total clients: ${this.clients.size}`);
+  }
+  
+  broadcastToUser(userId: number, data: any) {
+    const userClients = Array.from(this.clients).filter(client => 
+      client.userId === userId && client.readyState === WebSocket.OPEN
+    );
+    
+    const message = JSON.stringify(data);
+    let sentCount = 0;
+    
+    userClients.forEach(client => {
+      try {
+        client.send(message);
+        sentCount++;
+      } catch (error) {
+        log(`Error sending WebSocket message to user ${userId}: ${error}`);
+        this.removeClient(client);
+      }
+    });
+    
+    log(`Broadcasted call update to ${sentCount} clients for user ${userId}`);
+    return sentCount;
+  }
+  
+  pingClients() {
+    const deadClients: WebSocketClient[] = [];
+    
+    this.clients.forEach(client => {
+      if (!client.isAlive) {
+        deadClients.push(client);
+        return;
+      }
+      
+      client.isAlive = false;
+      client.ping();
+    });
+    
+    // Remove dead clients
+    deadClients.forEach(client => {
+      this.removeClient(client);
+      client.terminate();
+    });
+  }
+  
+  getClientCount(): number {
+    return this.clients.size;
+  }
+  
+  getUserClientCount(userId: number): number {
+    return Array.from(this.clients).filter(client => client.userId === userId).length;
+  }
+}
+
+// Global WebSocket manager instance
+const wsManager = new WebSocketManager();
+
+// Export for use in routes
+export { wsManager };
 
 // Raw body capture middleware for webhook signature verification
 // This must be before express.json() to capture the raw bytes
@@ -78,6 +155,74 @@ app.use((req, res, next) => {
 
 (async () => {
   const server = await registerRoutes(app);
+  
+  // Setup WebSocket server alongside Express
+  const wss = new WebSocket.Server({ server });
+  
+  wss.on('connection', (ws: WebSocketClient, req) => {
+    log('New WebSocket connection established');
+    
+    // Initialize client properties
+    ws.isAlive = true;
+    wsManager.addClient(ws);
+    
+    // Handle pong responses
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
+    
+    // Handle incoming messages
+    ws.on('message', (data: WebSocket.Data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        
+        if (message.type === 'subscribe' && message.userId) {
+          ws.userId = parseInt(message.userId);
+          log(`WebSocket client subscribed to updates for user ${ws.userId}`);
+          
+          // Send confirmation
+          ws.send(JSON.stringify({
+            type: 'subscription_confirmed',
+            userId: ws.userId,
+            timestamp: new Date().toISOString()
+          }));
+        } else if (message.type === 'ping') {
+          // Respond to client ping
+          ws.send(JSON.stringify({
+            type: 'pong',
+            timestamp: new Date().toISOString()
+          }));
+        }
+      } catch (error) {
+        log(`Error parsing WebSocket message: ${error}`);
+      }
+    });
+    
+    // Handle client disconnect
+    ws.on('close', () => {
+      log(`WebSocket client disconnected ${ws.userId ? `(user ${ws.userId})` : ''}`);
+      wsManager.removeClient(ws);
+    });
+    
+    // Handle WebSocket errors
+    ws.on('error', (error) => {
+      log(`WebSocket error: ${error}`);
+      wsManager.removeClient(ws);
+    });
+  });
+  
+  // Ping clients every 30 seconds to keep connections alive
+  const pingInterval = setInterval(() => {
+    wsManager.pingClients();
+  }, 30000);
+  
+  // Cleanup on server shutdown
+  process.on('SIGINT', () => {
+    clearInterval(pingInterval);
+    wss.close();
+  });
+  
+  log(`WebSocket server initialized. Ready for real-time call updates.`);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

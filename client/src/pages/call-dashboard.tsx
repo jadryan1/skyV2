@@ -177,6 +177,10 @@ export default function CallDashboard() {
   const queryClient = useQueryClient();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const isMobile = useIsMobile();
+  
+  // WebSocket connection for real-time updates
+  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [liveCalls, setLiveCalls] = useState<any[]>([]);
 
   // Get current user ID from localStorage
   const userId = Number(localStorage.getItem('userId')) || 1;
@@ -246,19 +250,111 @@ export default function CallDashboard() {
     gcTime: 0     // Disable caching to always fetch fresh data
   });
 
-
-
-  // Use only Twilio calls
-  const allCalls = useMemo(() => {
-    const twilioCall = callsData || [];
+  // WebSocket connection for real-time call updates
+  useEffect(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
     
-    // Sort by date, most recent first
-    return twilioCall.sort((a: any, b: any) => {
-      const dateA = new Date(`${a.date} ${a.time}`).getTime();
-      const dateB = new Date(`${b.date} ${b.time}`).getTime();
-      return dateB - dateA; // Most recent first
+    const websocket = new WebSocket(wsUrl);
+    
+    websocket.onopen = () => {
+      console.log('WebSocket connected for real-time call updates');
+      // Subscribe to user's call updates
+      websocket.send(JSON.stringify({ 
+        type: 'subscribe', 
+        userId: userId 
+      }));
+    };
+    
+    websocket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'call_update' && data.userId === userId) {
+          // Add or update call in real-time
+          setLiveCalls(prev => {
+            const existingIndex = prev.findIndex(call => call.callSid === data.call.callSid);
+            if (existingIndex >= 0) {
+              // Update existing call
+              const updated = [...prev];
+              updated[existingIndex] = { ...updated[existingIndex], ...data.call };
+              return updated;
+            } else {
+              // Add new call
+              return [data.call, ...prev];
+            }
+          });
+          
+          // Show toast notification for new calls
+          if (data.call.status === 'in-progress') {
+            toast({
+              title: "📞 Live Call In Progress",
+              description: `Call from ${data.call.phoneNumber || data.call.number} is active now`,
+              variant: "default"
+            });
+          } else if (data.call.status === 'completed') {
+            toast({
+              title: "✅ Call Completed", 
+              description: `Call from ${data.call.phoneNumber || data.call.number} has ended`,
+              variant: "default"
+            });
+          }
+          
+          // Refresh the main calls query to sync with database
+          queryClient.invalidateQueries({ queryKey: ['/api/calls/user', userId] });
+        }
+      } catch (error) {
+        console.error('Error parsing WebSocket message:', error);
+      }
+    };
+    
+    websocket.onclose = () => {
+      console.log('WebSocket disconnected, attempting to reconnect...');
+      // Attempt to reconnect after 3 seconds
+      setTimeout(() => {
+        if (ws?.readyState === WebSocket.CLOSED) {
+          setWs(null);
+        }
+      }, 3000);
+    };
+    
+    websocket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    setWs(websocket);
+    
+    return () => {
+      websocket.close();
+    };
+  }, [userId, queryClient, toast]);
+
+
+
+  // Combine database calls with live calls
+  const allCalls = useMemo(() => {
+    const dbCalls = callsData || [];
+    
+    // Merge live calls with database calls, avoiding duplicates
+    const mergedCalls = [...liveCalls];
+    
+    dbCalls.forEach((dbCall: any) => {
+      const existsInLive = liveCalls.find(liveCall => 
+        liveCall.callSid === dbCall.callSid || liveCall.id === dbCall.id
+      );
+      
+      if (!existsInLive) {
+        mergedCalls.push(dbCall);
+      }
     });
-  }, [callsData]);
+    
+    // Sort by timestamp, most recent first
+    return mergedCalls.sort((a: any, b: any) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(`${a.date} ${a.time}`).getTime();
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(`${b.date} ${b.time}`).getTime();
+      return timeB - timeA; // Most recent first
+    });
+  }, [callsData, liveCalls]);
 
   // Derived state
   const calls = allCalls;
@@ -839,7 +935,16 @@ export default function CallDashboard() {
                             </TableCell>
                             <TableCell>{call.contactName || call.name || "Unknown"}</TableCell>
                             <TableCell>{typeof call.duration === 'number' ? `${Math.floor(call.duration / 60)}m ${call.duration % 60}s` : call.duration}</TableCell>
-                            <TableCell>{getStatusBadge(call.status)}</TableCell>
+                            <TableCell>
+                              {call.status === 'in-progress' ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                  <span className="text-green-600 font-medium">🔴 LIVE</span>
+                                </div>
+                              ) : (
+                                getStatusBadge(call.status)
+                              )}
+                            </TableCell>
                             <TableCell className="max-w-[200px]">
                               <div className="truncate text-sm" title={call.summary}>
                                 {call.summary}

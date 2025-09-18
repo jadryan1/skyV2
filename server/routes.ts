@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { wsManager } from "./index";
 import { 
   insertUserSchema, 
   loginUserSchema, 
@@ -330,6 +331,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Use storage.createCall to properly trigger email notifications
       const result = await storage.createCall(newCallData);
       
+      // Broadcast real-time call update to connected clients
+      try {
+        const broadcastData = {
+          type: 'call_update',
+          userId: result.userId,
+          call: {
+            ...result,
+            status: result.status || 'completed',
+            isLive: result.status === 'in-progress'
+          },
+          timestamp: new Date().toISOString()
+        };
+        
+        const clientCount = wsManager.broadcastToUser(result.userId, broadcastData);
+        console.log(`📡 Broadcasted new call to ${clientCount} connected clients for user ${result.userId}`);
+      } catch (error) {
+        console.error('Error broadcasting call update:', error);
+      }
+      
       res.status(201).json({ 
         message: "Call created successfully", 
         data: result 
@@ -468,6 +488,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const newCall = await storage.createCall(callData);
       
       console.log(`Railway call logged for ${targetUser.email}:`, newCall);
+      
+      // Broadcast real-time call update to connected clients
+      try {
+        const broadcastData = {
+          type: 'call_update',
+          userId: newCall.userId,
+          call: {
+            ...newCall,
+            status: newCall.status || 'completed',
+            isLive: newCall.status === 'in-progress',
+            source: 'Railway AI'
+          },
+          timestamp: new Date().toISOString()
+        };
+        
+        const clientCount = wsManager.broadcastToUser(newCall.userId, broadcastData);
+        console.log(`📡 Railway: Broadcasted call update to ${clientCount} connected clients for user ${newCall.userId}`);
+      } catch (error) {
+        console.error('Error broadcasting Railway call update:', error);
+      }
       
       res.status(200).json({ 
         message: "Call logged successfully for Audamaur@gmail.com", 
