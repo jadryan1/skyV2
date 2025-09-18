@@ -998,6 +998,99 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // CALL STATUS CHANGES WEBHOOK: Simple endpoint for reliable webhook connectivity verification
+  // This is a lightweight webhook that logs all Twilio call status changes
+  app.post("/api/twilio/call-status", rateLimitWebhook, async (req: Request, res: Response) => {
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+    
+    try {
+      const { CallSid, CallStatus, From, To, Direction, Duration, Timestamp } = req.body;
+      
+      console.log(`📞 CALL STATUS: Received webhook from ${clientIp} - CallSid: ${CallSid}, Status: ${CallStatus}`);
+      
+      // SECURITY: Validate HMAC signature using per-client system
+      const isValid = process.env.NODE_ENV === 'development' || validateTwilioSignatureForClient(req);
+      if (!isValid) {
+        console.error(`🚫 CALL STATUS: Invalid HMAC signature from ${clientIp} for CallSid: ${CallSid}`);
+        logSecurityEvent('INVALID_CALL_STATUS_SIGNATURE', clientIp, CallSid || 'unknown');
+        return res.status(403).json({ error: 'Invalid signature' });
+      }
+      
+      // SECURITY: Idempotency protection to prevent duplicate processing
+      if (CallSid && !checkIdempotency(CallSid, `call-status-${CallStatus}`)) {
+        console.log(`📞 CALL STATUS: Duplicate webhook ignored for CallSid: ${CallSid}, Status: ${CallStatus}`);
+        return res.status(200).send("DUPLICATE_IGNORED");
+      }
+      
+      // Map Twilio call statuses to our database enum values
+      const mapTwilioStatusToDbStatus = (twilioStatus: string): 'in-progress' | 'completed' | 'missed' | 'failed' => {
+        switch (twilioStatus?.toLowerCase()) {
+          case 'ringing':
+          case 'answered': 
+          case 'in-progress':
+            return 'in-progress';
+          case 'completed':
+            return 'completed';
+          case 'busy':
+          case 'no-answer':
+            return 'missed';
+          case 'failed':
+          case 'canceled':
+          default:
+            return 'failed';
+        }
+      };
+      
+      const dbStatus = mapTwilioStatusToDbStatus(CallStatus);
+      
+      // Simple logging with timestamp, CallSid, and basic call info
+      const logData = {
+        timestamp: new Date().toISOString(),
+        callSid: CallSid,
+        status: CallStatus,
+        mappedStatus: dbStatus,
+        from: From,
+        to: To,
+        direction: Direction,
+        duration: Duration ? parseInt(Duration) : null,
+        clientIp
+      };
+      
+      console.log(`📞 CALL STATUS: Logging call status change:`, JSON.stringify(logData, null, 2));
+      
+      // Try to find existing call by Twilio CallSid and update it, or create a new minimal record
+      try {
+        const existingCall = await storage.getCallByTwilioSid(CallSid);
+        
+        if (existingCall) {
+          // Update existing call with new status
+          await storage.updateCall(existingCall.id, {
+            status: dbStatus,
+            duration: Duration ? parseInt(Duration) : existingCall.duration
+          });
+          console.log(`📞 CALL STATUS: Updated existing call ID ${existingCall.id} with status: ${dbStatus}`);
+        } else {
+          // For call status webhooks, we might not have the userId, so we'll create a minimal record
+          // This is primarily for connectivity verification, not full call processing
+          console.log(`📞 CALL STATUS: No existing call found for CallSid: ${CallSid}, logging status change only`);
+        }
+      } catch (storageError) {
+        // Don't fail the webhook if database operations fail - this is for connectivity verification
+        console.warn(`📞 CALL STATUS: Storage operation failed, but webhook connectivity verified:`, storageError);
+      }
+      
+      console.log(`✅ CALL STATUS: Successfully processed webhook for CallSid: ${CallSid}, Status: ${CallStatus} -> ${dbStatus}`);
+      
+      // IMPORTANT: Fast 200 response to prevent Twilio retries
+      res.status(200).send("OK");
+      
+    } catch (error) {
+      console.error(`❌ CALL STATUS: Error processing webhook from ${clientIp}:`, error);
+      // SECURITY: Always return 200 to Twilio to prevent retries that could cause issues
+      res.status(200).send("ERROR_LOGGED");
+    }
+  });
+
   // Set up Twilio integration for a specific user (secure endpoint)
   app.post("/api/twilio/setup/:userId", async (req: Request, res: Response) => {
     try {
