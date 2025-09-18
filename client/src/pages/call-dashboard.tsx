@@ -22,7 +22,8 @@ import {
   Home,
   Building,
   FileText,
-  Download
+  Download,
+  RefreshCw
 } from "lucide-react";
 import AudioWave from "@/components/audio-wave";
 import SkyIQText from "@/components/skyiq-text";
@@ -844,6 +845,22 @@ export default function CallDashboard() {
                       </DropdownMenuCheckboxItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+
+                  <Button 
+                    variant="outline"
+                    onClick={async () => {
+                      await refetch();
+                      toast({
+                        title: "Calls Refreshed",
+                        description: "Call data has been updated from the server.",
+                      });
+                    }}
+                    disabled={isLoading}
+                    data-testid="button-refresh-calls"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                    Refresh Calls
+                  </Button>
                 </div>
               </div>
             </CardHeader>
