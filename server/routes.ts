@@ -928,53 +928,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // REMOVED: Raw body parsing middleware (no signature validation needed)
 
-  // SIMPLE TRANSCRIPT WEBHOOK: Only captures transcript data, no complex processing
-  app.post("/api/twilio/webhook/user3", async (req: Request, res: Response) => {
-    try {
-      console.log("📝 TRANSCRIPT WEBHOOK: Raw body received");
-      
-      const { 
-        TranscriptionText, 
-        TranscriptionStatus,
-        CallSid,
-        From,
-        To 
-      } = req.body;
-      
-      // Only process if we have actual transcript data
-      if (TranscriptionText && TranscriptionText.trim()) {
-        console.log("📝 TRANSCRIPT RECEIVED:");
-        console.log(`📞 CallSid: ${CallSid}`);
-        console.log(`📱 From: ${From} → To: ${To}`);
-        console.log(`📝 Status: ${TranscriptionStatus}`);
-        console.log(`💬 Text: ${TranscriptionText}`);
-        
-        // Simple storage - just log to file or database
-        const transcriptData = {
-          timestamp: new Date().toISOString(),
-          callSid: CallSid,
-          from: From,
-          to: To,
-          status: TranscriptionStatus,
-          text: TranscriptionText
-        };
-        
-        // Log to console (or save to file/database as needed)
-        console.log("📄 TRANSCRIPT DATA:", JSON.stringify(transcriptData, null, 2));
-        
-        // Optional: Save to database if you want
-        // await saveTranscriptToDatabase(transcriptData);
-      } else {
-        console.log("📝 TRANSCRIPT WEBHOOK: No transcript text, skipping");
-      }
-      
-      // Always return 200 to Twilio
-      res.status(200).send("OK");
-      
-    } catch (error) {
-      console.error("📝 TRANSCRIPT ERROR:", error);
-      res.status(200).send("ERROR_LOGGED"); // Still return 200 to prevent retries
-    }
+  // ULTRA-SIMPLE USER3 WEBHOOK: No middleware, no validation, just logs payload
+  app.post('/api/twilio/webhook/user3', (req: Request, res: Response) => {
+    console.log('🎯 SIMPLE WEBHOOK - Body size:', JSON.stringify(req.body).length, 'bytes');
+    console.log('🎯 SIMPLE WEBHOOK - Webhook data:', req.body);
+    res.status(200).send('OK');
   });
 
   // Optional: Even simpler version that just logs everything

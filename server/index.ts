@@ -87,6 +87,15 @@ app.use('/api/twilio/webhook', express.raw({
   }
 }));
 
+// TEST ROUTE: Verify body parser configuration is working with 2MB limits
+app.post('/api/test-body-limit', (req, res) => {
+  console.log("🧪 Body parser test - received body size:", JSON.stringify(req.body).length, "bytes");
+  res.json({ 
+    message: "Body parser working", 
+    bodySize: JSON.stringify(req.body).length 
+  });
+});
+
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
