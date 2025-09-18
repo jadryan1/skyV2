@@ -28,6 +28,93 @@ const RATE_LIMIT_MAX_REQUESTS = 100; // Max 100 requests per minute per IP
 const processedWebhooks = new Map<string, number>();
 const IDEMPOTENCY_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
+// SECURITY: ElevenLabs webhook signature validation with correct t=<timestamp>,h=<hash> format
+function validateElevenLabsSignature(req: any, authToken: string): boolean {
+  const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+  const elevenLabsSignature = req.get('X-ElevenLabs-Signature');
+
+  try {
+    if (!elevenLabsSignature || elevenLabsSignature.trim() === '') {
+      console.error(`🚫 SECURITY: Missing ElevenLabs signature header from IP ${clientIp}`);
+      logSecurityEvent('MISSING_ELEVENLABS_SIGNATURE', clientIp, req.originalUrl);
+      return false;
+    }
+
+    // Parse ElevenLabs signature format: t=<timestamp>,h=<hash>
+    const signatureParts = elevenLabsSignature.split(',');
+    if (signatureParts.length !== 2) {
+      console.error(`🚫 SECURITY: Invalid ElevenLabs signature format from IP ${clientIp}`);
+      logSecurityEvent('INVALID_ELEVENLABS_FORMAT', clientIp, elevenLabsSignature.substring(0, 20));
+      return false;
+    }
+
+    // Extract timestamp and hash
+    const timestampPart = signatureParts[0];
+    const hashPart = signatureParts[1];
+
+    if (!timestampPart.startsWith('t=') || !hashPart.startsWith('h=')) {
+      console.error(`🚫 SECURITY: Invalid ElevenLabs signature parts from IP ${clientIp}`);
+      logSecurityEvent('INVALID_ELEVENLABS_PARTS', clientIp, elevenLabsSignature.substring(0, 20));
+      return false;
+    }
+
+    const timestamp = timestampPart.replace('t=', '');
+    const providedHash = hashPart.replace('h=', '');
+
+    // Validate timestamp format (should be numeric)
+    if (!/^\d+$/.test(timestamp)) {
+      console.error(`🚫 SECURITY: Invalid ElevenLabs timestamp format from IP ${clientIp}`);
+      logSecurityEvent('INVALID_ELEVENLABS_TIMESTAMP', clientIp, timestamp);
+      return false;
+    }
+
+    // Validate timestamp for replay protection (within 5 minutes)
+    const timestampMs = parseInt(timestamp) * 1000;
+    const now = Date.now();
+    const TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes
+
+    if (Math.abs(now - timestampMs) > TOLERANCE_MS) {
+      console.error(`🚫 SECURITY: ElevenLabs timestamp outside tolerance from IP ${clientIp}. Diff: ${Math.abs(now - timestampMs)}ms`);
+      logSecurityEvent('ELEVENLABS_TIMESTAMP_OUT_OF_RANGE', clientIp, timestamp);
+      return false;
+    }
+
+    // Validate hash format (should be 64 hex chars for SHA256)
+    if (!/^[a-f0-9]{64}$/i.test(providedHash)) {
+      console.error(`🚫 SECURITY: Invalid ElevenLabs hash format from IP ${clientIp}`);
+      logSecurityEvent('INVALID_ELEVENLABS_HASH', clientIp, providedHash.substring(0, 20));
+      return false;
+    }
+
+    // Compute expected signature using timestamp.request_body format
+    const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    const signedPayload = `${timestamp}.${body}`;
+    
+    const expectedHash = crypto
+      .createHmac('sha256', authToken)
+      .update(signedPayload, 'utf8')
+      .digest('hex');
+
+    // SECURITY: Use constant-time comparison to prevent timing attacks
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(providedHash, 'hex'),
+      Buffer.from(expectedHash, 'hex')
+    );
+
+    console.log(`🔐 ElevenLabs HMAC validation from ${clientIp}: ${isValid ? 'VALID' : 'INVALID'}`);
+    
+    if (!isValid) {
+      logSecurityEvent('INVALID_ELEVENLABS_SIGNATURE', clientIp, providedHash.substring(0, 20));
+    }
+
+    return isValid;
+  } catch (error) {
+    console.error(`🚫 SECURITY: ElevenLabs signature validation error from IP ${clientIp}:`, error.message);
+    logSecurityEvent('ELEVENLABS_VALIDATION_ERROR', clientIp, error.message);
+    return false;
+  }
+}
+
 // SECURITY: Enhanced webhook signature validation with security best practices
 function validateTwilioSignature(req: any, authToken?: string): boolean {
   const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
@@ -50,43 +137,9 @@ function validateTwilioSignature(req: any, authToken?: string): boolean {
     if (authToken) {
       const crypto = require('crypto');
       
-      // Handle ElevenLabs-style signatures (sha256=...)
+      // Handle ElevenLabs-style signatures (t=<timestamp>,h=<hash>)
       if (elevenLabsSignature) {
-        // Validate signature format
-        if (!elevenLabsSignature.startsWith('sha256=')) {
-          console.error(`🚫 SECURITY: Invalid ElevenLabs signature format from IP ${clientIp}`);
-          logSecurityEvent('INVALID_SIGNATURE_FORMAT', clientIp, elevenLabsSignature.substring(0, 20));
-          return false;
-        }
-        
-        const providedSignature = elevenLabsSignature.replace('sha256=', '');
-        
-        // Validate hex format and length (SHA256 = 64 hex chars)
-        if (!/^[a-f0-9]{64}$/i.test(providedSignature)) {
-          console.error(`🚫 SECURITY: Invalid ElevenLabs signature hex format from IP ${clientIp}`);
-          logSecurityEvent('INVALID_SIGNATURE_HEX', clientIp, providedSignature.substring(0, 20));
-          return false;
-        }
-        
-        const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-        const expectedSignature = crypto
-          .createHmac('sha256', authToken)
-          .update(body, 'utf8')
-          .digest('hex');
-        
-        // SECURITY: Use constant-time comparison to prevent timing attacks
-        const isValid = crypto.timingSafeEqual(
-          Buffer.from(providedSignature, 'hex'),
-          Buffer.from(expectedSignature, 'hex')
-        );
-        
-        console.log(`🔐 ElevenLabs HMAC validation from ${clientIp}: ${isValid ? 'VALID' : 'INVALID'}`);
-        
-        if (!isValid) {
-          logSecurityEvent('INVALID_SIGNATURE', clientIp, providedSignature.substring(0, 20));
-        }
-        
-        return isValid;
+        return validateElevenLabsSignature(req, authToken);
       }
       
       // Handle Hub-style signatures (sha1=...)
