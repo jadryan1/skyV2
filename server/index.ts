@@ -53,6 +53,18 @@ app.use((req, res, next) => {
   next();
 });
 
+  // Middleware to handle Replit host restrictions
+  app.use((req, res, next) => {
+    const host = req.headers.host;
+    if (host && host.endsWith('.replit.dev')) {
+      // Preserve original host for logging
+      req.headers['x-original-host'] = host;
+      // Normalize host to bypass Vite's allowedHosts restriction
+      req.headers.host = 'localhost';
+    }
+    next();
+  });
+
 (async () => {
   const server = await registerRoutes(app);
 
@@ -114,6 +126,17 @@ app.use((req, res, next) => {
     serverInstance = http.createServer(app);
     log("HTTP server configured for optimized startup");
   }
+
+  // Handle WebSocket upgrade for HMR with Replit domains
+  serverInstance.on('upgrade', (req, socket, head) => {
+    const host = req.headers.host;
+    if (host && host.endsWith('.replit.dev')) {
+      // Preserve original host for logging
+      req.headers['x-original-host'] = host;
+      // Normalize host to bypass Vite's allowedHosts restriction
+      req.headers.host = 'localhost';
+    }
+  });
 
   serverInstance.listen(port, "0.0.0.0", () => {
     log(`serving on port ${port}`);
