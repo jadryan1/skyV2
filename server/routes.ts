@@ -907,6 +907,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Webhook for Twilio recording completion
 
+  // MAIN TWILIO WEBHOOK - Processes calls for all users based on their phone numbers
+  app.post("/api/twilio/webhook", async (req: Request, res: Response) => {
+    try {
+      const { twilioService } = await import("./twilioService");
+      await twilioService.processCallWebhook(req.body);
+      res.status(200).send("OK");
+    } catch (error) {
+      console.error("Error processing Twilio webhook:", error);
+      res.status(500).send("Error processing webhook");
+    }
+  });
+
   // SIMPLE TRANSCRIPTION WEBHOOK - NO VALIDATION
   app.post("/api/twilio/transcription", (req: Request, res: Response) => {
     console.log('🎯 SIMPLE WEBHOOK: Transcription data received:', req.body);
