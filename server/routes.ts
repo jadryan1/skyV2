@@ -1012,6 +1012,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Webhook endpoint specifically for user 3 - routes ALL calls directly to user 3
+  // Handles both call status and transcription data in same endpoint
+  app.post("/api/twilio/webhook/user3", async (req: Request, res: Response) => {
+    try {
+      console.log("🎯 USER3 WEBHOOK: Received webhook data for user 3:", JSON.stringify(req.body, null, 2));
+      
+      const { twilioService } = await import("./twilioService");
+      
+      // Process call data and create record immediately (never reject calls)
+      await twilioService.processUser3CallWebhookEnhanced(req.body);
+      
+      console.log("✅ USER3 WEBHOOK: Successfully processed webhook for user 3");
+      res.status(200).send("OK");
+    } catch (error) {
+      console.error("❌ USER3 WEBHOOK: Error processing webhook for user 3:", error);
+      // Still return 200 to Twilio to avoid retries - we log errors internally
+      res.status(200).send("ERROR_LOGGED");
+    }
+  });
+
   // Set up Twilio integration for a specific user (secure endpoint)
   app.post("/api/twilio/setup/:userId", async (req: Request, res: Response) => {
     try {

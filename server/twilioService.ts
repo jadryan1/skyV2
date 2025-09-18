@@ -185,6 +185,96 @@ export class TwilioService {
   }
 
   /**
+   * Enhanced webhook processor for user 3 that handles both call data AND transcript data
+   * Routes ALL calls directly to user 3 and handles transcripts when available
+   * Never rejects calls due to missing transcript data
+   */
+  async processUser3CallWebhookEnhanced(webhookData: any): Promise<void> {
+    try {
+      const {
+        CallSid,
+        From,
+        To,
+        CallStatus,
+        CallDuration,
+        Direction,
+        RecordingUrl,
+        TranscriptionText,
+        TranscriptionUrl
+      } = webhookData;
+
+      console.log(`🎯 USER3 ENHANCED: Processing enhanced webhook for user 3 - CallSid: ${CallSid}`);
+      console.log(`📞 USER3 ENHANCED: From: ${From}, To: ${To}, Status: ${CallStatus}, Direction: ${Direction}`);
+      if (TranscriptionText) {
+        console.log(`📝 USER3 ENHANCED: Transcript available: ${TranscriptionText.substring(0, 100)}...`);
+      }
+
+      // Hardcode userId to 3 - bypass phone number matching
+      const userId = 3;
+
+      // Get user 3 to verify they exist
+      const user = await storage.getUser(userId);
+      if (!user) {
+        console.log(`❌ USER3 ENHANCED: User 3 not found in database`);
+        return;
+      }
+
+      // Fetch business info for user 3 for prompt context
+      const businessInfo = await storage.getBusinessInfo(userId);
+
+      // Fetch user 3's calls for prompt context
+      const userCalls = await storage.getCallsByUserId(userId);
+
+      // Generate business-specific prompt for user 3
+      const prompt = buildPrompt(businessInfo, userCalls);
+
+      // Map Twilio status to our status enum
+      const status = this.mapTwilioStatus(CallStatus);
+
+      // Extract phone number based on direction - key requirement!
+      const phoneNumber = Direction === 'inbound' ? From : To;
+
+      // Create call record for user 3 - ALWAYS create, never reject
+      const callData: InsertCall = {
+        userId: userId,
+        phoneNumber: phoneNumber,
+        contactName: null,
+        duration: CallDuration ? parseInt(CallDuration) : null,
+        status,
+        notes: this.getCallStatusNote(status, CallStatus, CallDuration),
+        summary: null,
+        transcript: TranscriptionText || null, // ✅ Handle transcript when available
+        twilioCallSid: CallSid,
+        direction: Direction,
+        recordingUrl: RecordingUrl || null,
+        isFromTwilio: true,
+        // Save generated prompt in the DB
+        aiPrompt: prompt,
+      } as any;
+
+      // Always create call record - never reject calls
+      // If Twilio sends multiple webhooks for same call (status, transcript, recording),
+      // each webhook represents valuable data points and should be preserved
+      await storage.createCall(callData);
+      console.log(`✅ USER3 ENHANCED: Call logged for user 3: ${CallSid}`);
+
+      console.log(`📋 USER3 ENHANCED: Status: ${CallStatus} -> ${status}, Duration: ${CallDuration}s`);
+      console.log(`🤖 USER3 ENHANCED: Generated prompt: ${prompt}`);
+      console.log(`📊 USER3 ENHANCED: Call data processed:`, {
+        userId: userId,
+        phoneNumber: phoneNumber,
+        status: status,
+        direction: Direction,
+        twilioCallSid: CallSid,
+        hasTranscript: !!TranscriptionText,
+        hasRecording: !!RecordingUrl
+      });
+    } catch (error) {
+      console.error('❌ USER3 ENHANCED: Error processing enhanced Twilio webhook for user 3:', error);
+    }
+  }
+
+  /**
    * Find user by matching their Twilio phone number with strict isolation
    */
   private async findUserByTwilioNumber(to: string, from: string, direction: string): Promise<User | null> {
