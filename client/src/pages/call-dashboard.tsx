@@ -21,7 +21,8 @@ import {
   Info,
   Home,
   Building,
-  FileText
+  FileText,
+  Download
 } from "lucide-react";
 import AudioWave from "@/components/audio-wave";
 import SkyIQText from "@/components/skyiq-text";
@@ -461,6 +462,60 @@ export default function CallDashboard() {
     }
   };
 
+  // Function to download audio files
+  const downloadAudio = async (recordingUrl: string, callId: number) => {
+    try {
+      // Extract filename from URL or create a meaningful default
+      const url = new URL(recordingUrl);
+      const pathParts = url.pathname.split('/');
+      let filename = pathParts[pathParts.length - 1];
+      
+      // If no extension or filename, create a default name
+      if (!filename || !filename.includes('.')) {
+        filename = `call-recording-${callId}.mp3`;
+      } else {
+        // Add callId to filename for uniqueness while preserving extension
+        const extensionIndex = filename.lastIndexOf('.');
+        if (extensionIndex > 0) {
+          const name = filename.substring(0, extensionIndex);
+          const ext = filename.substring(extensionIndex);
+          filename = `${name}-${callId}${ext}`;
+        } else {
+          filename = `${filename}-${callId}`;
+        }
+      }
+      
+      // Fetch the audio file
+      const response = await fetch(recordingUrl);
+      if (!response.ok) {
+        throw new Error('Failed to fetch audio file');
+      }
+      
+      // Create blob and download
+      const blob = await response.blob();
+      const url2 = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url2;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url2);
+      
+      toast({
+        title: "Download started",
+        description: `Audio file "${filename}" is downloading...`,
+      });
+    } catch (error) {
+      console.error('Error downloading audio file:', error);
+      toast({
+        title: "Download failed",
+        description: "There was a problem downloading the audio file. Please try again.",
+        variant: "destructive"
+      });
+    }
+  };
+
   // Get action badge
   const getActionBadge = (action: string) => {
     switch (action) {
@@ -797,11 +852,13 @@ export default function CallDashboard() {
                               {call.recordingUrl && (
                                 <Button 
                                   variant="ghost" 
-                                  onClick={() => window.open(call.recordingUrl, '_blank')}
+                                  onClick={() => downloadAudio(call.recordingUrl, call.id)}
                                   size="sm"
                                   className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                  data-testid={`button-download-audio-${call.id}`}
                                 >
-                                  🎵 Audio
+                                  <Download className="h-4 w-4 mr-1" />
+                                  📥 Download Audio
                                 </Button>
                               )}
                               {call.transcript && (
