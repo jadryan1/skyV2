@@ -34,48 +34,44 @@ const app = express();
 // SECURITY: Raw body capture middleware for webhook signature verification
 // This must be before express.json() to capture the raw bytes for specific endpoints
 
-// Capture raw body for Twilio webhooks (form-encoded)
-app.use('/api/twilio/webhook', (req: any, res, next) => {
-  let rawBody = '';
-  req.setEncoding('utf8');
-
-  req.on('data', (chunk: string) => {
-    rawBody += chunk;
-  });
-
-  req.on('end', () => {
-    req.rawBody = rawBody;
-    console.log(`🔍 Raw Twilio webhook body: ${rawBody}`);
+// Capture raw body for Twilio webhooks (form-encoded) with increased limit
+app.use('/api/twilio/webhook', express.raw({ 
+  type: 'application/x-www-form-urlencoded',
+  limit: '10mb',
+  verify: (req: any, res, buf) => {
+    req.rawBody = buf.toString('utf8');
+    console.log(`🔍 Raw Twilio webhook body: ${req.rawBody}`);
     
     // Parse the body manually for Twilio webhooks
-    const urlencoded = new URLSearchParams(rawBody);
+    const urlencoded = new URLSearchParams(req.rawBody);
     req.body = Object.fromEntries(urlencoded);
     console.log(`🔍 Parsed Twilio webhook body:`, req.body);
-    next();
-  });
-});
+  }
+}));
 
-// Capture raw body for ElevenLabs and other JSON webhooks
+// Capture raw body for ElevenLabs and other JSON webhooks with increased limit
 app.use('/api/webhook/', express.raw({ 
   type: 'application/json',
+  limit: '10mb',
   verify: (req: any, res, buf) => {
     // Store raw body for signature verification
     req.rawBody = buf;
   }
 }));
 
-// Capture raw body for any other webhook endpoints
+// Capture raw body for any other webhook endpoints with increased limit
 app.use('/webhook/', express.raw({ 
   type: 'application/json',
+  limit: '10mb',
   verify: (req: any, res, buf) => {
     // Store raw body for signature verification
     req.rawBody = buf;
   }
 }));
 
-// Standard JSON parsing for all other routes
+// Standard JSON parsing for all other routes with increased limit
 app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use((req, res, next) => {
   const start = Date.now();
