@@ -45,9 +45,12 @@ app.use('/api/twilio/webhook', (req: any, res, next) => {
 
   req.on('end', () => {
     req.rawBody = rawBody;
+    console.log(`🔍 Raw Twilio webhook body: ${rawBody}`);
+    
     // Parse the body manually for Twilio webhooks
     const urlencoded = new URLSearchParams(rawBody);
     req.body = Object.fromEntries(urlencoded);
+    console.log(`🔍 Parsed Twilio webhook body:`, req.body);
     next();
   });
 });
