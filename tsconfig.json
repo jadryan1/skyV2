@@ -14,6 +14,8 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "allowJs": true,
     "baseUrl": ".",
     "types": ["node", "vite/client"],
     "allowSyntheticDefaultImports": true,
