@@ -19,6 +19,10 @@ localPort = 37537
 externalPort = 3000
 
 [[ports]]
+localPort = 38959
+externalPort = 3002
+
+[[ports]]
 localPort = 40261
 externalPort = 3001
 
@@ -53,4 +57,4 @@ task = "shell.exec"
 args = "npm run dev"
 
 [agent]
-integrations = ["javascript_websocket:1.0.0", "javascript_sendgrid:1.0.0"]
+integrations = ["javascript_websocket:1.0.0", "javascript_sendgrid:1.0.0", "javascript_openai:1.0.0"]

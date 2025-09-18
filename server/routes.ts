@@ -553,8 +553,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // SECURITY HARDENED: Webhook endpoint specifically for user 3 - routes ALL calls directly to user 3
-  // Handles both call status and transcription data in same endpoint
+  // SECURITY HARDENED: Enhanced webhook endpoint for user 3 with phone validation and AI processing
+  // Routes calls directly to user 3 with intelligent validation and processing
   app.post("/api/twilio/webhook/user3", rateLimitWebhook, async (req: Request, res: Response) => {
     try {
       // SECURITY: Validate Twilio signature
@@ -563,27 +563,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ error: 'Invalid signature' });
       }
 
-      console.log("🎯 USER3 WEBHOOK: Received webhook data for user 3:", JSON.stringify(req.body, null, 2));
+      console.log("🎯 USER3 AI WEBHOOK: Received enhanced webhook data for user 3:", JSON.stringify(req.body, null, 2));
       
       const { CallSid, CallStatus, TranscriptionStatus } = req.body;
       
-      // SECURITY: Idempotency check
-      const eventType = TranscriptionStatus ? `transcription-${TranscriptionStatus}` : `call-${CallStatus}`;
-      if (!checkIdempotency(CallSid, eventType)) {
+      // Enhanced logging for debugging
+      console.log(`🎯 USER3 AI WEBHOOK: Extracted data - CallSid: ${CallSid}, CallStatus: ${CallStatus}, TranscriptionStatus: ${TranscriptionStatus}`);
+      
+      // SECURITY: Idempotency check with proper null checks
+      const eventType = TranscriptionStatus ? `transcription-${TranscriptionStatus}` : `call-${CallStatus || 'unknown'}`;
+      if (CallSid && !checkIdempotency(CallSid, eventType)) {
+        console.log(`🎯 USER3 AI WEBHOOK: Duplicate webhook ignored for CallSid: ${CallSid}`);
         return res.status(200).send("DUPLICATE_IGNORED");
       }
       
       const { twilioService } = await import("./twilioService");
       
-      // Process call data and create record immediately (never reject calls)
+      // **ENHANCED PROCESSING**: Use AI-powered webhook processing with phone validation
       await twilioService.processUser3CallWebhookEnhanced(req.body);
       
-      console.log("✅ USER3 WEBHOOK: Successfully processed webhook for user 3");
+      console.log("✅ USER3 AI WEBHOOK: Successfully processed enhanced webhook for user 3");
       
       // SECURITY: Fast 200 response
       res.status(200).send("OK");
     } catch (error) {
-      console.error("❌ USER3 WEBHOOK: Error processing webhook for user 3:", error);
+      console.error("❌ USER3 AI WEBHOOK: Error processing enhanced webhook for user 3:", error);
       // SECURITY: Still return 200 to Twilio to avoid retries - we log errors internally
       res.status(200).send("ERROR_LOGGED");
     }
