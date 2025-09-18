@@ -288,7 +288,9 @@ export class TwilioService {
         duration: CallDuration ? parseInt(CallDuration) : null,
         status,
         notes: this.getCallStatusNote(status, CallStatus, CallDuration),
-        summary: TranscriptionText ? `📊 Raw call data captured: ${TranscriptionText.substring(0, 200)}...` : 'Call captured without transcript',
+        summary: TranscriptionText ? 
+          `📊 Transcript captured (${TranscriptionText.length} characters): ${TranscriptionText.substring(0, 150)}...` : 
+          'Call captured - transcript processing',
         transcript: TranscriptionText || null, // Store FULL transcript as-is
         twilioCallSid: CallSid,
         direction: Direction,
