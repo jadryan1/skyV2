@@ -164,7 +164,9 @@ app.use((req, res, next) => {
   }
 
 (async () => {
-  const server = await registerRoutes(app);
+  try {
+    log('🚀 Starting server initialization...');
+    const server = await registerRoutes(app);
   
   // Setup WebSocket server alongside Express
   const wss = new WebSocketServer({ server });
@@ -360,5 +362,31 @@ app.use((req, res, next) => {
 
   serverInstance.listen(port, "0.0.0.0", () => {
     log(`serving on port ${port}`);
+    log('✅ Server startup completed successfully');
   });
-})();
+  
+  } catch (error) {
+    console.error('❌ Critical server startup error:', error);
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace available');
+    
+    // Log detailed error information for debugging
+    if (error instanceof Error) {
+      console.error('Error name:', error.name);
+      console.error('Error message:', error.message);
+    }
+    
+    // Give the system a moment to flush logs before exiting
+    setTimeout(() => {
+      console.error('🚫 Server startup failed. Exiting with error code 1.');
+      process.exit(1);
+    }, 100);
+  }
+})().catch((unhandledError) => {
+  console.error('💥 Unhandled async error during server startup:', unhandledError);
+  console.error('Stack trace:', unhandledError instanceof Error ? unhandledError.stack : 'No stack trace available');
+  
+  setTimeout(() => {
+    console.error('🚫 Critical failure. Exiting with error code 1.');
+    process.exit(1);
+  }, 100);
+});
