@@ -31,13 +31,51 @@ process.on('uncaughtException', (error) => {
 const app = express();
 
 
-// SECURITY: Raw body capture middleware for webhook signature verification
-// This must be before express.json() to capture the raw bytes for specific endpoints
+// BODY PARSER CONFIGURATION - MUST BE BEFORE ROUTES
+// Configure body parsers with larger limits for Twilio webhooks
+// This must come BEFORE any routes that need to parse request bodies
 
-// Capture raw body for Twilio webhooks (form-encoded) with increased limit for large payloads
+// For JSON payloads (like webhooks) - Apply globally first
+app.use(express.json({ 
+  limit: '2mb',  // Increased from default 100kb to handle large Twilio payloads
+  verify: (req: any, res, buf) => {
+    // Store raw body for signature verification
+    req.rawBody = buf;
+  }
+}));
+
+// For URL-encoded form data (Twilio also uses this format)
+app.use(express.urlencoded({ 
+  limit: '2mb', 
+  extended: true,
+  verify: (req: any, res, buf) => {
+    // Store raw body for signature verification
+    req.rawBody = buf;
+  }
+}));
+
+// Specific configuration for Twilio webhook routes to ensure larger limits
+// Apply these BEFORE routes to override the global settings
+app.use('/api/twilio', express.json({ 
+  limit: '2mb',
+  verify: (req: any, res, buf) => { 
+    req.rawBody = buf;
+    console.log(`🔍 Twilio JSON webhook body length: ${buf.length} bytes`);
+  }
+}));
+app.use('/api/twilio', express.urlencoded({ 
+  limit: '2mb', 
+  extended: true,
+  verify: (req: any, res, buf) => { 
+    req.rawBody = buf;
+    console.log(`🔍 Twilio URL-encoded webhook body length: ${buf.length} bytes`);
+  }
+}));
+
+// Raw body parser for webhook signature verification
 app.use('/api/twilio/webhook', express.raw({ 
   type: 'application/x-www-form-urlencoded',
-  limit: '2mb',  // Increased from 10mb to 2mb for consistency
+  limit: '2mb',
   verify: (req: any, res, buf) => {
     req.rawBody = buf.toString('utf8');
     console.log(`🔍 Raw Twilio webhook body: ${req.rawBody}`);
@@ -48,34 +86,6 @@ app.use('/api/twilio/webhook', express.raw({
     console.log(`🔍 Parsed Twilio webhook body:`, req.body);
   }
 }));
-
-// Additional body parser specifically for Twilio routes to handle large payloads
-app.use('/api/twilio', express.json({ limit: '2mb' }));
-app.use('/api/twilio', express.urlencoded({ limit: '2mb', extended: true }));
-
-// Capture raw body for ElevenLabs and other JSON webhooks with increased limit
-app.use('/api/webhook/', express.raw({ 
-  type: 'application/json',
-  limit: '10mb',
-  verify: (req: any, res, buf) => {
-    // Store raw body for signature verification
-    req.rawBody = buf;
-  }
-}));
-
-// Capture raw body for any other webhook endpoints with increased limit
-app.use('/webhook/', express.raw({ 
-  type: 'application/json',
-  limit: '10mb',
-  verify: (req: any, res, buf) => {
-    // Store raw body for signature verification
-    req.rawBody = buf;
-  }
-}));
-
-// Standard JSON parsing for all other routes with increased limit
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use((req, res, next) => {
   const start = Date.now();
