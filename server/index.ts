@@ -31,10 +31,30 @@ process.on('uncaughtException', (error) => {
 const app = express();
 
 
-// SECURITY: Raw body capture middleware for Twilio webhook signature verification
+// SECURITY: Raw body capture middleware for webhook signature verification
 // This must be before express.json() to capture the raw bytes for specific endpoints
+
+// Capture raw body for Twilio webhooks (form-encoded)
 app.use('/api/twilio/', express.raw({ 
   type: 'application/x-www-form-urlencoded',
+  verify: (req: any, res, buf) => {
+    // Store raw body for signature verification
+    req.rawBody = buf;
+  }
+}));
+
+// Capture raw body for ElevenLabs and other JSON webhooks
+app.use('/api/webhook/', express.raw({ 
+  type: 'application/json',
+  verify: (req: any, res, buf) => {
+    // Store raw body for signature verification
+    req.rawBody = buf;
+  }
+}));
+
+// Capture raw body for any other webhook endpoints
+app.use('/webhook/', express.raw({ 
+  type: 'application/json',
   verify: (req: any, res, buf) => {
     // Store raw body for signature verification
     req.rawBody = buf;

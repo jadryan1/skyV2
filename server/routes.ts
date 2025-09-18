@@ -28,6 +28,10 @@ const RATE_LIMIT_MAX_REQUESTS = 100; // Max 100 requests per minute per IP
 const processedWebhooks = new Map<string, number>();
 const IDEMPOTENCY_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
+// SECURITY: ElevenLabs replay protection cache
+const elevenLabsReplayCache = new Map<string, number>();
+const ELEVENLABS_REPLAY_TTL = 5 * 60 * 1000; // 5 minutes
+
 // SECURITY: ElevenLabs webhook signature validation with correct t=<timestamp>,h=<hash> format
 function validateElevenLabsSignature(req: any, authToken: string): boolean {
   const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
@@ -87,7 +91,8 @@ function validateElevenLabsSignature(req: any, authToken: string): boolean {
     }
 
     // Compute expected signature using timestamp.request_body format
-    const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    const body = req.rawBody ? req.rawBody.toString('utf8') : 
+                 (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
     const signedPayload = `${timestamp}.${body}`;
     
     const expectedHash = crypto
@@ -105,12 +110,19 @@ function validateElevenLabsSignature(req: any, authToken: string): boolean {
     
     if (!isValid) {
       logSecurityEvent('INVALID_ELEVENLABS_SIGNATURE', clientIp, providedHash.substring(0, 20));
+      return false;
+    }
+
+    // SECURITY: Check replay protection after validating signature
+    if (!checkElevenLabsReplayProtection(timestamp, providedHash, clientIp)) {
+      return false;
     }
 
     return isValid;
   } catch (error) {
-    console.error(`🚫 SECURITY: ElevenLabs signature validation error from IP ${clientIp}:`, error.message);
-    logSecurityEvent('ELEVENLABS_VALIDATION_ERROR', clientIp, error.message);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`🚫 SECURITY: ElevenLabs signature validation error from IP ${clientIp}:`, errorMessage);
+    logSecurityEvent('ELEVENLABS_VALIDATION_ERROR', clientIp, errorMessage);
     return false;
   }
 }
@@ -151,7 +163,8 @@ function validateTwilioSignature(req: any, authToken?: string): boolean {
         }
         
         const providedSignature = hubSignature.replace('sha1=', '');
-        const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+        const body = req.rawBody ? req.rawBody.toString('utf8') : 
+                     (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
         const expectedSignature = crypto
           .createHmac('sha1', authToken)
           .update(body, 'utf8')
@@ -175,19 +188,23 @@ function validateTwilioSignature(req: any, authToken?: string): boolean {
       // Handle Twilio-style signatures (original format)
       if (twilioSignature) {
         const url = req.protocol + '://' + req.get('host') + req.originalUrl;
-        const body = new URLSearchParams(req.body).toString();
+        
+        // CRITICAL FIX: Use raw body for Twilio signature validation
+        // Twilio expects URL + form-encoded body, not JSON
+        const body = req.rawBody ? req.rawBody.toString('utf8') : 
+                     (typeof req.body === 'string' ? req.body : new URLSearchParams(req.body).toString());
+        
         const expectedSignatureData = url + body;
         const expectedSignature = crypto
           .createHmac('sha1', authToken)
           .update(expectedSignatureData, 'utf8')
           .digest('base64');
         
-        const expectedFullSignature = `${url}=${expectedSignature}`;
-        
+        // CRITICAL FIX: Compare header directly to signature (not prefixed with URL)
         // SECURITY: Use constant-time comparison
         const isValid = crypto.timingSafeEqual(
           Buffer.from(twilioSignature, 'utf8'),
-          Buffer.from(expectedFullSignature, 'utf8')
+          Buffer.from(expectedSignature, 'utf8')
         );
         
         console.log(`🔐 Twilio HMAC validation from ${clientIp}: ${isValid ? 'VALID' : 'INVALID'}`);
@@ -206,8 +223,9 @@ function validateTwilioSignature(req: any, authToken?: string): boolean {
     return false;
     
   } catch (error) {
-    console.error(`🚫 SECURITY: Signature validation error from IP ${clientIp}:`, error.message);
-    logSecurityEvent('SIGNATURE_VALIDATION_ERROR', clientIp, error.message);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`🚫 SECURITY: Signature validation error from IP ${clientIp}:`, errorMessage);
+    logSecurityEvent('SIGNATURE_VALIDATION_ERROR', clientIp, errorMessage);
     return false;
   }
 }
@@ -295,6 +313,147 @@ function checkIdempotency(callSid: string, eventType: string): boolean {
   processedWebhooks.set(key, now);
   return true;
 }
+
+// SECURITY: ElevenLabs replay protection using timestamp + signature
+function checkElevenLabsReplayProtection(timestamp: string, signature: string, clientIp: string): boolean {
+  const key = `${timestamp}-${signature.substring(0, 16)}`; // Use timestamp + signature prefix
+  const now = Date.now();
+  
+  // Clean up old entries (older than 5 minutes)
+  for (const [k, cacheTime] of elevenLabsReplayCache.entries()) {
+    if (now - cacheTime > ELEVENLABS_REPLAY_TTL) {
+      elevenLabsReplayCache.delete(k);
+    }
+  }
+  
+  if (elevenLabsReplayCache.has(key)) {
+    console.error(`🚫 SECURITY: ElevenLabs replay attack detected from IP ${clientIp}. Key: ${key}`);
+    logSecurityEvent('ELEVENLABS_REPLAY_ATTACK', clientIp, key);
+    return false;
+  }
+  
+  elevenLabsReplayCache.set(key, now);
+  return true;
+}
+
+// SECURITY: Per-client webhook secret management
+function getClientWebhookSecret(clientId: string): string | null {
+  // Check for client-specific environment variable (e.g., WEBHOOK_SECRET_CLIENT_1)
+  const clientSecretEnvVar = `WEBHOOK_SECRET_CLIENT_${clientId.toUpperCase()}`;
+  const clientSecret = process.env[clientSecretEnvVar];
+  
+  if (clientSecret) {
+    console.log(`🔐 Using client-specific secret for client: ${clientId}`);
+    return clientSecret;
+  }
+  
+  // Fall back to backward compatibility with USER3_TWILIO_AUTH_TOKEN for client "3" or "user3"
+  if (clientId === '3' || clientId.toLowerCase() === 'user3') {
+    const fallbackSecret = process.env.USER3_TWILIO_AUTH_TOKEN;
+    if (fallbackSecret) {
+      console.log(`🔐 Using backward compatibility secret for client: ${clientId}`);
+      return fallbackSecret;
+    }
+  }
+  
+  // No secret found for this client
+  console.warn(`⚠️  No webhook secret found for client: ${clientId}`);
+  return null;
+}
+
+// SECURITY: Extract client ID from webhook request
+function extractClientIdFromRequest(req: any): string | null {
+  // Try to extract client ID from URL path
+  const pathParts = req.originalUrl.split('/');
+  
+  // Look for patterns like /api/twilio/webhook/user3 or /api/webhook/client-123
+  const webhookIndex = pathParts.findIndex((part: string) => part === 'webhook');
+  if (webhookIndex !== -1 && webhookIndex + 1 < pathParts.length) {
+    const clientPart = pathParts[webhookIndex + 1];
+    
+    // Handle user3 format
+    if (clientPart.startsWith('user')) {
+      return clientPart.replace('user', '');
+    }
+    
+    // Handle client-X format
+    if (clientPart.startsWith('client-') || clientPart.startsWith('client_')) {
+      return clientPart.replace(/^client[-_]/, '');
+    }
+    
+    // Return as-is if it looks like a client ID
+    return clientPart;
+  }
+  
+  // Try to extract from headers
+  const clientIdHeader = req.get('X-Client-ID') || req.get('X-Client-Id');
+  if (clientIdHeader) {
+    return clientIdHeader;
+  }
+  
+  // Try to extract from query parameters
+  if (req.query.client_id || req.query.clientId) {
+    return req.query.client_id || req.query.clientId;
+  }
+  
+  // Default fallback - could be removed for stricter security
+  console.warn(`⚠️  Could not determine client ID from request: ${req.originalUrl}`);
+  return null;
+}
+
+// SECURITY: Enhanced webhook signature validation with per-client secrets
+function validateTwilioSignatureForClient(req: any, clientId?: string, authToken?: string): boolean {
+  const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+  
+  try {
+    // Determine the client ID if not provided
+    const resolvedClientId = clientId || extractClientIdFromRequest(req);
+    
+    // Get the appropriate auth token for this client
+    let resolvedAuthToken = authToken;
+    
+    if (!resolvedAuthToken && resolvedClientId) {
+      const clientSecret = getClientWebhookSecret(resolvedClientId);
+      resolvedAuthToken = clientSecret || undefined;
+    }
+    
+    // If still no token, log the security event
+    if (!resolvedAuthToken) {
+      console.error(`🚫 SECURITY: No webhook secret available for client ${resolvedClientId || 'unknown'} from IP ${clientIp}`);
+      logSecurityEvent('NO_CLIENT_SECRET', clientIp, resolvedClientId || 'unknown');
+      return false;
+    }
+    
+    // Use the existing validateTwilioSignature function with the resolved token
+    const isValid = validateTwilioSignature(req, resolvedAuthToken);
+    
+    if (isValid) {
+      console.log(`✅ SECURITY: Valid webhook signature for client ${resolvedClientId || 'unknown'} from IP ${clientIp}`);
+    } else {
+      console.warn(`🚫 SECURITY: Invalid webhook signature for client ${resolvedClientId || 'unknown'} from IP ${clientIp}`);
+      logSecurityEvent('INVALID_CLIENT_SIGNATURE', clientIp, resolvedClientId || 'unknown');
+    }
+    
+    return isValid;
+    
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`🚫 SECURITY: Client webhook validation error from IP ${clientIp}:`, errorMessage);
+    logSecurityEvent('CLIENT_VALIDATION_ERROR', clientIp, errorMessage);
+    return false;
+  }
+}
+
+// Export validator functions for testing
+export { 
+  validateElevenLabsSignature,
+  validateTwilioSignature,
+  validateTwilioSignatureForClient,
+  checkIdempotency,
+  checkElevenLabsReplayProtection,
+  logSecurityEvent,
+  rateLimitWebhook
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // PRIORITY: Fast health check endpoints for deployment health checks
@@ -720,8 +879,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // SECURITY HARDENED: Webhook for Twilio transcription completion  
   app.post("/api/twilio/transcription", rateLimitWebhook, async (req: Request, res: Response) => {
     try {
-      // SECURITY: Validate Twilio signature
-      if (!validateTwilioSignature(req)) {
+      // SECURITY: Validate Twilio signature with per-client secrets
+      if (!validateTwilioSignatureForClient(req)) {
         console.error('Invalid Twilio signature for transcription webhook');
         return res.status(403).json({ error: 'Invalid signature' });
       }
@@ -755,11 +914,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const { CallSid, CallStatus, TranscriptionStatus, TranscriptionText, RecordingUrl, From, To, Direction } = req.body;
       
-      // Get USER3_TWILIO_AUTH_TOKEN from environment for HMAC validation
-      const USER3_TWILIO_AUTH_TOKEN = process.env.USER3_TWILIO_AUTH_TOKEN || 'your_user3_auth_token_here';
-      
-      // SECURITY: Validate HMAC signature for user 3
-      if (!validateTwilioSignature(req, USER3_TWILIO_AUTH_TOKEN)) {
+      // SECURITY: Validate HMAC signature for user 3 using per-client validation
+      if (!validateTwilioSignatureForClient(req, '3')) {
         console.error('🚫 USER3 ENHANCED: Invalid HMAC signature - rejecting request');
         return res.status(403).json({ error: 'Invalid signature' });
       }

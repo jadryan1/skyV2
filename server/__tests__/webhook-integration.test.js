@@ -49,12 +49,14 @@ const sampleElevenLabsPayload = {
 };
 
 // Helper functions for signature creation
-function createElevenLabsSignature(payload, secret) {
-  const signature = crypto
+function createElevenLabsSignature(payload, secret, timestamp) {
+  const ts = timestamp || Math.floor(Date.now() / 1000);
+  const signedPayload = `${ts}.${payload}`;
+  const hash = crypto
     .createHmac('sha256', secret)
-    .update(payload)
+    .update(signedPayload, 'utf8')
     .digest('hex');
-  return `sha256=${signature}`;
+  return `t=${ts},h=${hash}`;
 }
 
 function createHubSignature(payload, secret) {
@@ -70,7 +72,7 @@ function createTwilioSignature(url, body, secret) {
     .createHmac('sha1', secret)
     .update(url + body)
     .digest('base64');
-  return `${url}=${signature}`;
+  return signature; // Return just the signature, not prefixed with URL
 }
 
 // Test results tracking
@@ -147,7 +149,7 @@ async function testMalformedSignatureFormat() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-ElevenLabs-Signature': 'invalid_format=abc123def456', // Wrong prefix
+      'X-ElevenLabs-Signature': 'invalid_format=abc123def456', // Wrong prefix (should be t=timestamp,h=hash)
       'User-Agent': 'Security-Test/1.0'
     },
     body: payload
@@ -169,7 +171,7 @@ async function testInvalidHexSignature() {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-ElevenLabs-Signature': 'sha256=invalid_hex_characters_xyz', // Invalid hex
+      'X-ElevenLabs-Signature': 't=1234567890,h=invalid_hex_characters_xyz', // Invalid hex
       'User-Agent': 'Security-Test/1.0'
     },
     body: payload
@@ -352,7 +354,7 @@ async function testActualElevenLabsPayload() {
 // Security Feature Tests
 async function testRateLimiting() {
   const payload = JSON.stringify(sampleElevenLabsPayload);
-  const invalidSignature = 'sha256=invalid_signature_for_rate_limit_test_123456789012';
+  const invalidSignature = 't=1234567890,h=invalid_signature_for_rate_limit_test_123456789012';
   
   // Send multiple invalid requests quickly to trigger rate limiting
   const promises = [];
@@ -362,7 +364,7 @@ async function testRateLimiting() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-ElevenLabs-Signature': invalidSignature + i,
+          'X-ElevenLabs-Signature': invalidSignature.replace('1234567890', '123456789' + i),
           'User-Agent': 'Security-Test-Rate-Limit/1.0'
         },
         body: payload

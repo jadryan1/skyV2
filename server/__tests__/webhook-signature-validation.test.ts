@@ -19,8 +19,9 @@ import express from 'express';
 import { 
   validateTwilioSignature, 
   validateElevenLabsSignature, 
-  validateHubSignature, 
-  validateTwilioStyleSignature 
+  validateTwilioSignatureForClient,
+  checkIdempotency,
+  checkElevenLabsReplayProtection
 } from '../routes';
 import type { Request, Response } from 'express';
 
@@ -49,13 +50,15 @@ function createMockRequest(headers: Record<string, string>, body: any, options: 
   } as Request;
 }
 
-// Helper function to create valid ElevenLabs signature
-function createElevenLabsSignature(payload: string, secret: string): string {
-  const signature = crypto
+// Helper function to create valid ElevenLabs signature in new t=timestamp,h=hash format
+function createElevenLabsSignature(payload: string, secret: string, timestamp?: number): string {
+  const ts = timestamp || Math.floor(Date.now() / 1000);
+  const signedPayload = `${ts}.${payload}`;
+  const hash = crypto
     .createHmac('sha256', secret)
-    .update(payload)
+    .update(signedPayload, 'utf8')
     .digest('hex');
-  return `sha256=${signature}`;
+  return `t=${ts},h=${hash}`;
 }
 
 // Helper function to create valid Hub signature
@@ -136,7 +139,7 @@ describe('Webhook Signature Validation - Edge Cases', () => {
   });
 
   describe('Malformed Signature Formats', () => {
-    test('should reject ElevenLabs signature not starting with sha256=', () => {
+    test('should reject ElevenLabs signature not in t=timestamp,h=hash format', () => {
       const payload = JSON.stringify(sampleElevenLabsPayload);
       const mockReq = createMockRequest({
         'x-elevenlabs-signature': 'invalid_prefix=abc123def456'
