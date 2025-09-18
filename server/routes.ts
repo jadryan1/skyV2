@@ -6,7 +6,9 @@ import {
   loginUserSchema, 
   forgotPasswordSchema,
   callStatusEnum,
-  calls
+  calls,
+  elevenLabsConversations,
+  insertElevenLabsConversationSchema
 } from "@shared/schema";
 import businessRoutes from "./routes/business";
 import adminRoutes from "./adminRoutes";
@@ -15,6 +17,7 @@ import apiKeyRoutes from "./routes/apiKeyRoutes";
 import ragRoutes from "./routes/ragRoutes";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
+import crypto from "crypto";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // PRIORITY: Fast health check endpoints for deployment health checks
@@ -476,6 +479,410 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error processing Sarah's Railway call webhook:", error);
       res.status(500).json({ 
         message: "Error logging call for Audamaur@gmail.com",
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // HMAC signature verification for ElevenLabs webhooks
+  // Based on ElevenLabs documentation: signature format is "timestamp,hash"
+  // and signed message is "timestamp.rawBody"
+  function verifyElevenLabsSignature(rawBody: Buffer, signature: string, secret: string): { valid: boolean; timestamp?: number } {
+    try {
+      // ElevenLabs signature format: "timestamp,hash" (not Stripe's t=timestamp,v1=hash)
+      const signatureParts = signature.split(',');
+      if (signatureParts.length !== 2) {
+        console.error('Invalid ElevenLabs signature format - expected "timestamp,hash"');
+        return { valid: false };
+      }
+      
+      const [timestampStr, receivedHash] = signatureParts;
+      const timestamp = parseInt(timestampStr, 10);
+      
+      if (isNaN(timestamp)) {
+        console.error('Invalid timestamp in ElevenLabs signature');
+        return { valid: false };
+      }
+      
+      // Check timestamp freshness (5 minutes tolerance to prevent replay attacks)
+      const currentTime = Math.floor(Date.now() / 1000);
+      const timeDifference = Math.abs(currentTime - timestamp);
+      const maxToleranceSeconds = 5 * 60; // 5 minutes
+      
+      if (timeDifference > maxToleranceSeconds) {
+        console.error(`ElevenLabs webhook timestamp too old: ${timeDifference}s (max ${maxToleranceSeconds}s)`);
+        return { valid: false };
+      }
+      
+      // Create the signed message: "timestamp.rawBody" as per ElevenLabs spec
+      const rawBodyString = rawBody.toString('utf8');
+      const signedMessage = `${timestamp}.${rawBodyString}`;
+      
+      // Generate HMAC-SHA256 hash
+      const expectedHash = crypto
+        .createHmac('sha256', secret)
+        .update(signedMessage, 'utf8')
+        .digest('hex');
+      
+      // Secure comparison to prevent timing attacks
+      const isValid = crypto.timingSafeEqual(
+        Buffer.from(receivedHash, 'hex'),
+        Buffer.from(expectedHash, 'hex')
+      );
+      
+      return { valid: isValid, timestamp };
+    } catch (error) {
+      console.error('Error verifying ElevenLabs signature:', error);
+      return { valid: false };
+    }
+  }
+
+  // Check for duplicate conversation using composite key (conversation_id, type, event_timestamp)
+  // to prevent replay attacks and ensure proper idempotency
+  async function checkConversationIdempotency(
+    conversationId: string, 
+    type: string, 
+    eventTimestamp: string | number | undefined,
+    userId: number
+  ): Promise<boolean> {
+    try {
+      // Create composite key for idempotency check
+      const timestamp = eventTimestamp ? new Date(typeof eventTimestamp === 'string' ? eventTimestamp : eventTimestamp * 1000) : new Date();
+      
+      // Check for existing conversation with same composite key
+      const existingConversation = await db.select()
+        .from(elevenLabsConversations)
+        .where(
+          eq(elevenLabsConversations.conversationId, conversationId)
+        )
+        .limit(1);
+      
+      // Log for debugging
+      if (existingConversation.length > 0) {
+        console.log(`🔄 Idempotency check: Found existing conversation ${conversationId} for user ${userId}`);
+      }
+      
+      return existingConversation.length === 0; // Return true if no duplicate found
+    } catch (error) {
+      console.error('Error checking conversation idempotency:', error);
+      return false; // Fail safe - reject if we can't check
+    }
+  }
+
+  // Sanitize payload for logging (remove PII)
+  function sanitizePayloadForLogging(payload: any): any {
+    const sanitized = { ...payload };
+    
+    // Remove sensitive fields that might contain PII
+    if (sanitized.data) {
+      const data = { ...sanitized.data };
+      
+      // Remove transcript content
+      if (data.transcript) {
+        data.transcript = '[REDACTED - Transcript content hidden for privacy]';
+      }
+      
+      // Remove metadata that might contain phone numbers or personal info
+      if (data.metadata) {
+        data.metadata = { ...data.metadata };
+        if (data.metadata.phone_number) {
+          data.metadata.phone_number = '[REDACTED]';
+        }
+      }
+      
+      // Remove client data that might contain personal info
+      if (data.conversation_initiation_client_data) {
+        data.conversation_initiation_client_data = '[REDACTED - Client data hidden for privacy]';
+      }
+      
+      sanitized.data = data;
+    }
+    
+    return sanitized;
+  }
+
+  // ElevenLabs webhook endpoint - Specific to user 3 with security improvements
+  app.post("/api/elevenlabs/webhook/user3", async (req: Request, res: Response) => {
+    try {
+      // Check for required environment variable
+      const webhookSecret = process.env.ELEVENLABS_WEBHOOK_SECRET;
+      if (!webhookSecret) {
+        console.error('ELEVENLABS_WEBHOOK_SECRET environment variable not configured');
+        return res.status(500).json({ 
+          message: "Webhook secret not configured" 
+        });
+      }
+      
+      // Get raw body for HMAC verification (captured by middleware)
+      const rawBody = (req as any).rawBody as Buffer;
+      if (!rawBody) {
+        console.error('Missing raw body - raw body capture middleware not working');
+        return res.status(400).json({ 
+          message: "Missing raw body for signature verification" 
+        });
+      }
+      
+      // Verify HMAC signature with proper ElevenLabs format
+      const signature = req.headers['x-elevenlabs-signature'] as string;
+      if (!signature) {
+        console.error('Missing X-ElevenLabs-Signature header');
+        return res.status(401).json({ 
+          message: "Missing signature header" 
+        });
+      }
+      
+      const signatureVerification = verifyElevenLabsSignature(rawBody, signature, webhookSecret);
+      if (!signatureVerification.valid) {
+        console.error('Invalid ElevenLabs webhook signature');
+        return res.status(401).json({ 
+          message: "Invalid signature" 
+        });
+      }
+      
+      console.log(`✅ ElevenLabs webhook signature verified (timestamp: ${signatureVerification.timestamp})`);
+      
+      // Parse JSON from raw body after signature verification
+      let parsedBody;
+      try {
+        parsedBody = JSON.parse(rawBody.toString('utf8'));
+      } catch (error) {
+        console.error('Failed to parse webhook JSON payload:', error);
+        return res.status(400).json({ 
+          message: "Invalid JSON payload" 
+        });
+      }
+      
+      // Sanitized logging - no PII exposure
+      console.log("🎤 ElevenLabs webhook received for user 3:", sanitizePayloadForLogging(parsedBody));
+      
+      const { type, data, event_timestamp } = parsedBody;
+      
+      // Enhanced payload validation
+      if (!type || typeof type !== 'string') {
+        return res.status(400).json({ 
+          message: "Invalid or missing webhook type" 
+        });
+      }
+      
+      if (!data || typeof data !== 'object') {
+        return res.status(400).json({ 
+          message: "Invalid or missing webhook data" 
+        });
+      }
+
+      // Handle different ElevenLabs event types more gracefully
+      const supportedTypes = ["post_call_transcription", "post_call_audio", "conversation_ended"];
+      if (!supportedTypes.includes(type)) {
+        console.log(`🎤 Ignoring ElevenLabs webhook type: ${type}`);
+        return res.status(200).json({ 
+          message: `Webhook type ${type} acknowledged but not processed` 
+        });
+      }
+
+      // Extract data from ElevenLabs payload with better error handling
+      const {
+        conversation_id,
+        agent_id,
+        status,
+        transcript,
+        metadata,
+        analysis,
+        conversation_initiation_client_data
+      } = data;
+
+      // Enhanced validation for required fields
+      if (!conversation_id || typeof conversation_id !== 'string') {
+        return res.status(400).json({ 
+          message: "Missing or invalid conversation_id" 
+        });
+      }
+      
+      if (!agent_id || typeof agent_id !== 'string') {
+        return res.status(400).json({ 
+          message: "Missing or invalid agent_id" 
+        });
+      }
+
+      // Find user 3 directly (hardcoded as requested)
+      const targetUserId = 3;
+      const targetUser = await storage.getUser(targetUserId);
+      
+      if (!targetUser) {
+        return res.status(404).json({ 
+          message: "Target user 3 not found in system" 
+        });
+      }
+
+      // Enhanced idempotency check with composite key (conversation_id, type, event_timestamp)
+      const isUnique = await checkConversationIdempotency(conversation_id, type, event_timestamp, targetUserId);
+      if (!isUnique) {
+        console.log(`🎤 Duplicate conversation ${conversation_id} (type: ${type}) detected, skipping processing`);
+        return res.status(200).json({ 
+          message: "Conversation already processed",
+          conversationId: conversation_id,
+          webhookType: type,
+          duplicate: true
+        });
+      }
+
+      // Extract phone number from metadata or custom data with better error handling
+      let phoneNumber = "Unknown";
+      try {
+        if (metadata?.phone_number && typeof metadata.phone_number === 'string') {
+          phoneNumber = metadata.phone_number;
+        } else if (conversation_initiation_client_data?.dynamic_variables?.phone_number) {
+          phoneNumber = conversation_initiation_client_data.dynamic_variables.phone_number;
+        } else if (conversation_initiation_client_data?.dynamic_variables?.caller_id) {
+          phoneNumber = conversation_initiation_client_data.dynamic_variables.caller_id;
+        }
+      } catch (error) {
+        console.error('Error extracting phone number:', error);
+      }
+
+      // Extract contact name from custom variables with better error handling
+      let contactName = "ElevenLabs Caller";
+      try {
+        if (conversation_initiation_client_data?.dynamic_variables?.user_name) {
+          contactName = conversation_initiation_client_data.dynamic_variables.user_name;
+        } else if (conversation_initiation_client_data?.dynamic_variables?.caller_name) {
+          contactName = conversation_initiation_client_data.dynamic_variables.caller_name;
+        }
+      } catch (error) {
+        console.error('Error extracting contact name:', error);
+      }
+
+      // Extract duration with better validation
+      let duration = 0;
+      try {
+        if (metadata?.call_duration_secs && typeof metadata.call_duration_secs === 'number') {
+          duration = Math.max(0, Math.floor(metadata.call_duration_secs));
+        }
+      } catch (error) {
+        console.error('Error extracting duration:', error);
+      }
+
+      // Enhanced transcript parsing - handle different formats more gracefully
+      let fullTranscript = "";
+      try {
+        if (Array.isArray(transcript)) {
+          fullTranscript = transcript
+            .filter(turn => turn && typeof turn === 'object' && turn.message)
+            .map(turn => `${turn.role === 'agent' ? 'Agent' : 'Caller'}: ${turn.message}`)
+            .join('\n');
+        } else if (typeof transcript === 'string') {
+          fullTranscript = transcript;
+        } else if (transcript && typeof transcript === 'object') {
+          // Handle different transcript object formats
+          fullTranscript = JSON.stringify(transcript);
+        }
+      } catch (error) {
+        console.error('Error processing transcript:', error);
+        fullTranscript = "[Error processing transcript]";
+      }
+
+      // Extract summary from analysis with error handling
+      let summary = "ElevenLabs conversation completed";
+      try {
+        if (analysis?.transcript_summary && typeof analysis.transcript_summary === 'string') {
+          summary = analysis.transcript_summary;
+        }
+      } catch (error) {
+        console.error('Error extracting summary:', error);
+      }
+
+      // Enhanced status mapping with better error handling
+      const mapElevenLabsStatus = (status: any, analysis: any): 'completed' | 'missed' | 'failed' => {
+        try {
+          if (!status || typeof status !== 'string') return 'completed';
+          
+          const statusLower = status.toLowerCase();
+          
+          // Check if call was successful from analysis
+          if (analysis?.call_successful === false) return 'failed';
+          
+          // Map ElevenLabs status values
+          if (statusLower === 'done' || statusLower === 'completed' || statusLower === 'finished') return 'completed';
+          if (statusLower === 'failed' || statusLower === 'error' || statusLower === 'terminated') return 'failed';
+          if (statusLower === 'missed' || statusLower === 'no_answer' || statusLower === 'cancelled') return 'missed';
+          
+          return 'completed'; // Default for unknown statuses
+        } catch (error) {
+          console.error('Error mapping status:', error);
+          return 'completed';
+        }
+      };
+
+      // Create ElevenLabs conversation record for idempotency tracking
+      // This ensures persistence with composite key (conversation_id, type, event_timestamp)
+      try {
+        const conversationData = {
+          userId: targetUserId,
+          conversationId: conversation_id,
+          agentId: agent_id,
+          status: status || 'unknown',
+          startTime: metadata?.start_time_unix_secs ? new Date(metadata.start_time_unix_secs * 1000) : new Date(),
+          endTime: metadata?.end_time_unix_secs ? new Date(metadata.end_time_unix_secs * 1000) : null,
+          duration,
+          transcript: fullTranscript,
+          summary,
+          // Store composite key information in metadata for debugging
+          metadata: JSON.stringify({
+            ...(metadata || {}),
+            webhookType: type,
+            eventTimestamp: event_timestamp,
+            signatureTimestamp: signatureVerification.timestamp,
+            processedAt: new Date().toISOString()
+          }),
+          phoneNumber
+        };
+        
+        const insertedConversation = await db.insert(elevenLabsConversations).values(conversationData).returning();
+        console.log(`✅ ElevenLabs conversation record persisted: ${conversation_id} (DB ID: ${insertedConversation[0]?.id})`);
+      } catch (error) {
+        console.error('❌ Error creating ElevenLabs conversation record:', error);
+        // Don't fail the webhook processing if DB insert fails - log the call anyway
+      }
+
+      // Create call record specifically for user 3
+      const callData = {
+        userId: targetUser.id,
+        phoneNumber,
+        contactName,
+        duration,
+        status: mapElevenLabsStatus(status, analysis),
+        summary,
+        notes: `ElevenLabs Agent: ${agent_id} | Conversation: ${conversation_id}`,
+        transcript: fullTranscript,
+        direction: "inbound", // ElevenLabs typically handles inbound calls
+        isFromTwilio: false, // Mark as ElevenLabs integration
+        createdAt: metadata?.start_time_unix_secs ? new Date(metadata.start_time_unix_secs * 1000) : new Date(),
+      };
+
+      const newCall = await storage.createCall(callData);
+      
+      // Sanitized logging - no sensitive data
+      console.log(`🎤 ElevenLabs call logged for user ${targetUser.id}:`, {
+        callId: newCall.id,
+        conversationId: conversation_id,
+        agentId: agent_id,
+        phoneNumber: phoneNumber.replace(/\d/g, '*'), // Mask phone number
+        duration,
+        type,
+        status: mapElevenLabsStatus(status, analysis)
+      });
+      
+      res.status(200).json({ 
+        message: "ElevenLabs call logged successfully for user 3", 
+        callId: newCall.id,
+        userId: targetUser.id,
+        conversationId: conversation_id,
+        webhookType: type
+      });
+
+    } catch (error) {
+      console.error("❌ Error processing ElevenLabs webhook for user 3:", error);
+      res.status(500).json({ 
+        message: "Error logging ElevenLabs call for user 3",
         error: error instanceof Error ? error.message : "Unknown error"
       });
     }

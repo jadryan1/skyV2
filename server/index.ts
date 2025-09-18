@@ -20,6 +20,17 @@ process.on('uncaughtException', (error) => {
 });
 
 const app = express();
+
+// Raw body capture middleware for webhook signature verification
+// This must be before express.json() to capture the raw bytes
+function rawBodyCapture(req: any, res: any, buf: Buffer, encoding: string) {
+  req.rawBody = buf;
+}
+
+// Apply raw body capture only to ElevenLabs webhook routes
+app.use('/api/elevenlabs/webhook', express.raw({ type: 'application/json', verify: rawBodyCapture }));
+
+// Standard JSON parsing for all other routes
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
