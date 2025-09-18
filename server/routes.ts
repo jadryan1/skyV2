@@ -28,76 +28,314 @@ const RATE_LIMIT_MAX_REQUESTS = 100; // Max 100 requests per minute per IP
 const processedWebhooks = new Map<string, number>();
 const IDEMPOTENCY_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
-// SECURITY: Twilio webhook signature validation with proper HMAC for user3
-function validateTwilioSignature(req: any, authToken?: string): boolean {
+// SECURITY CONSTANTS
+const REPLAY_PROTECTION_WINDOW = 5 * 60 * 1000; // 5 minutes in milliseconds
+const SIGNATURE_VALIDATION_FAILED_ATTEMPTS = new Map<string, { count: number; lastAttempt: number }>();
+const MAX_FAILED_ATTEMPTS = 5;
+const FAILED_ATTEMPTS_WINDOW = 15 * 60 * 1000; // 15 minutes
+
+// SECURITY: Enhanced webhook signature validation with timing attack protection and replay prevention
+function validateTwilioSignature(req: any, authToken?: string, options: { skipTimestampValidation?: boolean, clientIp?: string } = {}): { isValid: boolean, reason?: string } {
+  const clientIp = options.clientIp || req.ip || req.connection.remoteAddress || 'unknown';
+  const timestamp = Date.now();
+  
   try {
     // Check for different signature headers (Twilio, ElevenLabs, etc.)
     const twilioSignature = req.get('X-Twilio-Signature');
     const elevenLabsSignature = req.get('X-ElevenLabs-Signature');
     const hubSignature = req.get('X-Hub-Signature');
+    const timestampHeader = req.get('X-Timestamp') || req.get('X-ElevenLabs-Timestamp');
     
     const signature = twilioSignature || elevenLabsSignature || hubSignature;
     
     if (!signature) {
-      console.error('Missing signature header (X-Twilio-Signature, X-ElevenLabs-Signature, or X-Hub-Signature)');
-      return false;
+      console.error(`[SECURITY] Missing signature header from IP ${clientIp}`, {
+        timestamp,
+        userAgent: req.get('User-Agent'),
+        url: req.originalUrl
+      });
+      trackFailedAttempt(clientIp);
+      return { isValid: false, reason: 'MISSING_SIGNATURE_HEADER' };
+    }
+
+    // Check if IP has too many failed attempts
+    if (isIPBlocked(clientIp)) {
+      console.error(`[SECURITY] IP ${clientIp} blocked due to too many failed signature attempts`);
+      return { isValid: false, reason: 'IP_BLOCKED' };
     }
 
     // If we have an auth token, validate the HMAC signature
     if (authToken) {
-      const crypto = require('crypto');
+      let validationResult: { isValid: boolean, reason?: string };
       
       // Handle ElevenLabs-style signatures (sha256=...)
-      if (elevenLabsSignature && elevenLabsSignature.startsWith('sha256=')) {
-        const providedSignature = elevenLabsSignature.replace('sha256=', '');
-        const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-        const expectedSignature = crypto
-          .createHmac('sha256', authToken)
-          .update(body)
-          .digest('hex');
-        
-        const isValid = providedSignature === expectedSignature;
-        console.log(`ElevenLabs HMAC validation: ${isValid ? 'VALID' : 'INVALID'}`);
-        return isValid;
+      if (elevenLabsSignature) {
+        validationResult = validateElevenLabsSignature(elevenLabsSignature, req.body, authToken, timestampHeader, options.skipTimestampValidation);
       }
-      
       // Handle Hub-style signatures (sha1=...)
-      if (hubSignature && hubSignature.startsWith('sha1=')) {
-        const providedSignature = hubSignature.replace('sha1=', '');
-        const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-        const expectedSignature = crypto
-          .createHmac('sha1', authToken)
-          .update(body)
-          .digest('base64');
-        
-        const isValid = providedSignature === expectedSignature;
-        console.log(`Hub HMAC validation: ${isValid ? 'VALID' : 'INVALID'}`);
-        return isValid;
+      else if (hubSignature) {
+        validationResult = validateHubSignature(hubSignature, req.body, authToken);
+      }
+      // Handle Twilio-style signatures (original format)
+      else if (twilioSignature) {
+        validationResult = validateTwilioStyleSignature(twilioSignature, req, authToken);
+      }
+      else {
+        console.error(`[SECURITY] Unknown signature format from IP ${clientIp}:`, signature);
+        trackFailedAttempt(clientIp);
+        return { isValid: false, reason: 'UNKNOWN_SIGNATURE_FORMAT' };
       }
       
-      // Handle Twilio-style signatures (original format)
-      if (twilioSignature) {
-        const url = req.protocol + '://' + req.get('host') + req.originalUrl;
-        const body = new URLSearchParams(req.body).toString();
-        const expectedSignature = crypto
-          .createHmac('sha1', authToken)
-          .update(url + body)
-          .digest('base64');
-        
-        const isValid = twilioSignature === `${url}=${expectedSignature}`;
-        console.log(`Twilio HMAC validation: ${isValid ? 'VALID' : 'INVALID'}`);
-        return isValid;
+      // Log validation result with security context
+      if (validationResult.isValid) {
+        console.log(`[SECURITY] Signature validation SUCCESS for IP ${clientIp}`, {
+          timestamp,
+          signatureType: elevenLabsSignature ? 'ElevenLabs' : hubSignature ? 'Hub' : 'Twilio',
+          url: req.originalUrl
+        });
+        clearFailedAttempts(clientIp);
+      } else {
+        console.error(`[SECURITY] Signature validation FAILED for IP ${clientIp}`, {
+          timestamp,
+          reason: validationResult.reason,
+          signatureType: elevenLabsSignature ? 'ElevenLabs' : hubSignature ? 'Hub' : 'Twilio',
+          url: req.originalUrl,
+          userAgent: req.get('User-Agent')
+        });
+        trackFailedAttempt(clientIp);
       }
+      
+      return validationResult;
     }
 
-    // Fallback: just check if signature is present (for testing)
-    console.log('Signature validation: signature present (no auth token validation)');
-    return true;
+    // SECURITY: No auth token provided - FAIL CLOSED for security
+    console.error(`[SECURITY] No auth token provided for signature validation from IP ${clientIp}`);
+    trackFailedAttempt(clientIp);
+    return { isValid: false, reason: 'MISSING_AUTH_TOKEN' };
   } catch (error) {
-    console.error('Error validating signature:', error);
-    return false;
+    console.error(`[SECURITY] Error validating signature from IP ${clientIp}:`, error);
+    trackFailedAttempt(clientIp);
+    return { isValid: false, reason: 'SIGNATURE_VALIDATION_ERROR' };
   }
 }
+
+// SECURITY: Validate ElevenLabs signature with constant-time comparison and replay protection
+function validateElevenLabsSignature(signature: string, body: any, authToken: string, timestampHeader?: string, skipTimestampValidation: boolean = false): { isValid: boolean, reason?: string } {
+  try {
+    // Check signature format
+    if (!signature.startsWith('sha256=')) {
+      return { isValid: false, reason: 'INVALID_SIGNATURE_FORMAT' };
+    }
+    
+    const providedSignature = signature.replace('sha256=', '');
+    
+    // Validate hex format
+    if (!/^[a-f0-9]{64}$/i.test(providedSignature)) {
+      return { isValid: false, reason: 'INVALID_HEX_FORMAT' };
+    }
+    
+    // SECURITY: REQUIRE timestamp header for replay protection
+    if (!skipTimestampValidation) {
+      if (!timestampHeader) {
+        return { isValid: false, reason: 'MISSING_TIMESTAMP_HEADER' };
+      }
+      const timestamp = parseInt(timestampHeader);
+      if (isNaN(timestamp)) {
+        return { isValid: false, reason: 'INVALID_TIMESTAMP_FORMAT' };
+      }
+      
+      const now = Date.now();
+      // Auto-detect timestamp format (seconds vs milliseconds)
+      const timestampMs = timestamp > 9999999999 ? timestamp : timestamp * 1000;
+      const age = now - timestampMs;
+      
+      if (age > REPLAY_PROTECTION_WINDOW) {
+        return { isValid: false, reason: 'TIMESTAMP_TOO_OLD' };
+      }
+      
+      if (age < -60000) { // Allow 1 minute clock skew
+        return { isValid: false, reason: 'TIMESTAMP_IN_FUTURE' };
+      }
+    } else {
+      // Close the if block properly
+    }
+    
+    // SECURITY: Use raw body bytes for HMAC computation
+    let bodyForSigning: string | Buffer;
+    if (body && typeof body === 'object' && body.rawBody) {
+      bodyForSigning = body.rawBody;
+    } else if (typeof body === 'string') {
+      bodyForSigning = body;
+    } else {
+      bodyForSigning = JSON.stringify(body);
+    }
+    
+    const expectedSignature = crypto
+      .createHmac('sha256', authToken)
+      .update(bodyForSigning)
+      .digest('hex');
+    
+    // SECURITY: Use constant-time comparison to prevent timing attacks
+    const providedBuffer = Buffer.from(providedSignature, 'hex');
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    
+    if (providedBuffer.length !== expectedBuffer.length) {
+      return { isValid: false, reason: 'SIGNATURE_LENGTH_MISMATCH' };
+    }
+    
+    const isValid = crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+    return { isValid, reason: isValid ? undefined : 'SIGNATURE_MISMATCH' };
+    
+  } catch (error) {
+    console.error('[SECURITY] Error in ElevenLabs signature validation:', error);
+    return { isValid: false, reason: 'ELEVENLABS_VALIDATION_ERROR' };
+  }
+}
+
+// SECURITY: Validate Hub signature with constant-time comparison
+function validateHubSignature(signature: string, body: any, authToken: string): { isValid: boolean, reason?: string } {
+  try {
+    if (!signature.startsWith('sha1=')) {
+      return { isValid: false, reason: 'INVALID_HUB_SIGNATURE_FORMAT' };
+    }
+    
+    const providedSignature = signature.replace('sha1=', '');
+    
+    // SECURITY: Use raw body bytes if available, otherwise use string representation
+    let bodyForSigning: string | Buffer;
+    if (body && typeof body === 'object' && body.rawBody) {
+      bodyForSigning = body.rawBody;
+    } else if (typeof body === 'string') {
+      bodyForSigning = body;
+    } else {
+      bodyForSigning = JSON.stringify(body);
+    }
+    
+    // SECURITY: Use hex format per GitHub webhook specification
+    const expectedSignature = crypto
+      .createHmac('sha1', authToken)
+      .update(bodyForSigning)
+      .digest('hex');
+    
+    // SECURITY: Use constant-time comparison with hex encoding
+    const providedBuffer = Buffer.from(providedSignature, 'hex');
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+    
+    if (providedBuffer.length !== expectedBuffer.length) {
+      return { isValid: false, reason: 'HUB_SIGNATURE_LENGTH_MISMATCH' };
+    }
+    
+    const isValid = crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+    return { isValid, reason: isValid ? undefined : 'HUB_SIGNATURE_MISMATCH' };
+    
+  } catch (error) {
+    console.error('[SECURITY] Error in Hub signature validation:', error);
+    return { isValid: false, reason: 'HUB_VALIDATION_ERROR' };
+  }
+}
+
+// SECURITY: Validate Twilio signature with constant-time comparison
+function validateTwilioStyleSignature(signature: string, req: any, authToken: string): { isValid: boolean, reason?: string } {
+  try {
+    const url = req.protocol + '://' + req.get('host') + req.originalUrl;
+    
+    // SECURITY: Use raw body bytes if available, otherwise construct from parsed body
+    let bodyForSigning: string;
+    if (req.rawBody) {
+      bodyForSigning = req.rawBody.toString('utf8');
+    } else {
+      // Fallback: construct from parsed body
+      bodyForSigning = new URLSearchParams(req.body).toString();
+    }
+    
+    const expectedSignature = crypto
+      .createHmac('sha1', authToken)
+      .update(url + bodyForSigning)
+      .digest('base64');
+    
+    // SECURITY: Compare header directly against HMAC signature (no URL prefix)
+    const providedBuffer = Buffer.from(signature, 'base64');
+    const expectedBuffer = Buffer.from(expectedSignature, 'base64');
+    
+    if (providedBuffer.length !== expectedBuffer.length) {
+      return { isValid: false, reason: 'TWILIO_SIGNATURE_LENGTH_MISMATCH' };
+    }
+    
+    const isValid = crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+    return { isValid, reason: isValid ? undefined : 'TWILIO_SIGNATURE_MISMATCH' };
+    
+  } catch (error) {
+    console.error('[SECURITY] Error in Twilio signature validation:', error);
+    return { isValid: false, reason: 'TWILIO_VALIDATION_ERROR' };
+  }
+}
+
+// SECURITY: Track failed signature validation attempts
+function trackFailedAttempt(clientIp: string): void {
+  const now = Date.now();
+  const current = SIGNATURE_VALIDATION_FAILED_ATTEMPTS.get(clientIp) || { count: 0, lastAttempt: now };
+  
+  // Reset count if outside window
+  if (now - current.lastAttempt > FAILED_ATTEMPTS_WINDOW) {
+    current.count = 1;
+  } else {
+    current.count++;
+  }
+  
+  current.lastAttempt = now;
+  SIGNATURE_VALIDATION_FAILED_ATTEMPTS.set(clientIp, current);
+}
+
+// SECURITY: Check if IP is blocked due to too many failed attempts
+function isIPBlocked(clientIp: string): boolean {
+  const current = SIGNATURE_VALIDATION_FAILED_ATTEMPTS.get(clientIp);
+  if (!current) return false;
+  
+  const now = Date.now();
+  if (now - current.lastAttempt > FAILED_ATTEMPTS_WINDOW) {
+    // Clean up old entry
+    SIGNATURE_VALIDATION_FAILED_ATTEMPTS.delete(clientIp);
+    return false;
+  }
+  
+  return current.count >= MAX_FAILED_ATTEMPTS;
+}
+
+// SECURITY: Clear failed attempts for successful validations
+function clearFailedAttempts(clientIp: string): void {
+  SIGNATURE_VALIDATION_FAILED_ATTEMPTS.delete(clientIp);
+}
+
+// SECURITY: Cleanup function for failed attempts map to prevent memory growth
+function cleanupFailedAttempts(): void {
+  const now = Date.now();
+  for (const [clientIp, data] of SIGNATURE_VALIDATION_FAILED_ATTEMPTS.entries()) {
+    if (now - data.lastAttempt > FAILED_ATTEMPTS_WINDOW) {
+      SIGNATURE_VALIDATION_FAILED_ATTEMPTS.delete(clientIp);
+    }
+  }
+}
+
+// SECURITY: Improved IP detection for proper rate limiting behind proxies
+function getClientIP(req: Request): string {
+  // Check various headers that proxies might use to forward the real IP
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    // X-Forwarded-For can contain multiple IPs, use the first one
+    const ips = (forwarded as string).split(',').map(ip => ip.trim());
+    return ips[0];
+  }
+  
+  return req.headers['x-real-ip'] as string ||
+         req.headers['x-client-ip'] as string ||
+         req.connection.remoteAddress ||
+         req.socket.remoteAddress ||
+         req.ip ||
+         'unknown';
+}
+
+// SECURITY: Periodic cleanup of failed attempts (run every 15 minutes)
+setInterval(cleanupFailedAttempts, FAILED_ATTEMPTS_WINDOW);
 
 // SECURITY: Rate limiting middleware for webhooks
 function rateLimitWebhook(req: Request, res: Response, next: any) {
@@ -152,6 +390,16 @@ function checkIdempotency(callSid: string, eventType: string): boolean {
   processedWebhooks.set(key, now);
   return true;
 }
+
+// SECURITY: Export validator functions for testing
+export {
+  validateTwilioSignature,
+  validateElevenLabsSignature,
+  validateHubSignature,
+  validateTwilioStyleSignature,
+  rateLimitWebhook,
+  checkIdempotency
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // PRIORITY: Fast health check endpoints for deployment health checks
@@ -578,9 +826,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/twilio/transcription", rateLimitWebhook, async (req: Request, res: Response) => {
     try {
       // SECURITY: Validate Twilio signature
-      if (!validateTwilioSignature(req)) {
-        console.error('Invalid Twilio signature for transcription webhook');
-        return res.status(403).json({ error: 'Invalid signature' });
+      const validationResult = validateTwilioSignature(req);
+      if (!validationResult.isValid) {
+        console.error('Invalid Twilio signature for transcription webhook:', validationResult.reason);
+        return res.status(403).json({ error: 'Invalid signature', reason: validationResult.reason });
       }
 
       console.log("📝 Transcription webhook received:", req.body);
@@ -616,9 +865,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const USER3_TWILIO_AUTH_TOKEN = process.env.USER3_TWILIO_AUTH_TOKEN || 'your_user3_auth_token_here';
       
       // SECURITY: Validate HMAC signature for user 3
-      if (!validateTwilioSignature(req, USER3_TWILIO_AUTH_TOKEN)) {
-        console.error('🚫 USER3 ENHANCED: Invalid HMAC signature - rejecting request');
-        return res.status(403).json({ error: 'Invalid signature' });
+      const validationResult = validateTwilioSignature(req, USER3_TWILIO_AUTH_TOKEN, { clientIp: req.ip });
+      if (!validationResult.isValid) {
+        console.error('🚫 USER3 ENHANCED: Invalid HMAC signature - rejecting request:', validationResult.reason);
+        return res.status(403).json({ error: 'Invalid signature', reason: validationResult.reason });
       }
       
       // Enhanced logging for debugging
