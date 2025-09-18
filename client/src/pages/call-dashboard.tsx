@@ -251,84 +251,134 @@ export default function CallDashboard() {
     gcTime: 0     // Disable caching to always fetch fresh data
   });
 
-  // WebSocket connection for real-time call updates
+  // WebSocket connection for real-time call updates with enhanced reconnection
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-    
-    const websocket = new WebSocket(wsUrl);
-    
-    websocket.onopen = () => {
-      console.log('WebSocket connected for real-time call updates');
-      // Subscribe to user's call updates
-      websocket.send(JSON.stringify({ 
-        type: 'subscribe', 
-        userId: userId 
-      }));
-    };
-    
-    websocket.onmessage = (event) => {
+    let websocket: WebSocket | null = null;
+    let reconnectAttempts = 0;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    const maxReconnectAttempts = 10;
+    const reconnectDelay = 3000;
+
+    const connect = () => {
       try {
-        const data = JSON.parse(event.data);
+        // Construct proper WebSocket URL
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}`;
         
-        if (data.type === 'call_update' && data.userId === userId) {
-          // Add or update call in real-time
-          setLiveCalls(prev => {
-            const existingIndex = prev.findIndex(call => call.callSid === data.call.callSid);
-            if (existingIndex >= 0) {
-              // Update existing call
-              const updated = [...prev];
-              updated[existingIndex] = { ...updated[existingIndex], ...data.call };
-              return updated;
-            } else {
-              // Add new call
-              return [data.call, ...prev];
-            }
-          });
+        console.log(`🔗 Attempting WebSocket connection to: ${wsUrl}`);
+        websocket = new WebSocket(wsUrl);
+        
+        websocket.onopen = () => {
+          console.log('✅ WebSocket connected for real-time call updates');
+          reconnectAttempts = 0; // Reset counter on successful connection
           
-          // Show toast notification for new calls
-          if (data.call.status === 'in-progress') {
-            toast({
-              title: "📞 Live Call In Progress",
-              description: `Call from ${data.call.phoneNumber || data.call.number} is active now`,
-              variant: "default"
-            });
-          } else if (data.call.status === 'completed') {
-            toast({
-              title: "✅ Call Completed", 
-              description: `Call from ${data.call.phoneNumber || data.call.number} has ended`,
-              variant: "default"
-            });
+          // Subscribe to user's call updates
+          try {
+            websocket?.send(JSON.stringify({ 
+              type: 'subscribe', 
+              userId: userId 
+            }));
+            console.log(`📡 Subscribed to call updates for user ${userId}`);
+          } catch (error) {
+            console.error('❌ Failed to send subscription message:', error);
           }
+        };
+        
+        websocket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('📨 Received WebSocket message:', data);
+            
+            if (data.type === 'call_update' && data.userId === userId) {
+              // Add or update call in real-time
+              setLiveCalls(prev => {
+                const existingIndex = prev.findIndex(call => 
+                  call.callSid === data.call.callSid || call.id === data.call.id
+                );
+                if (existingIndex >= 0) {
+                  // Update existing call
+                  const updated = [...prev];
+                  updated[existingIndex] = { ...updated[existingIndex], ...data.call };
+                  console.log('🔄 Updated existing call in live state');
+                  return updated;
+                } else {
+                  // Add new call at the top
+                  console.log('➕ Added new call to live state');
+                  return [data.call, ...prev];
+                }
+              });
+              
+              // Show toast notification for new calls
+              if (data.call.status === 'in-progress') {
+                toast({
+                  title: "📞 Live Call In Progress",
+                  description: `Call from ${data.call.phoneNumber || data.call.number || 'Unknown'} is active now`,
+                  variant: "default"
+                });
+              } else if (data.call.status === 'completed') {
+                toast({
+                  title: "✅ Call Completed", 
+                  description: `Call from ${data.call.phoneNumber || data.call.number || 'Unknown'} has ended`,
+                  variant: "default"
+                });
+              }
+              
+              // Refresh the main calls query to sync with database
+              queryClient.invalidateQueries({ queryKey: ['/api/calls/user', userId] });
+            }
+          } catch (error) {
+            console.error('❌ Error parsing WebSocket message:', error);
+          }
+        };
+        
+        websocket.onclose = (event) => {
+          console.log(`🔌 WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
           
-          // Refresh the main calls query to sync with database
-          queryClient.invalidateQueries({ queryKey: ['/api/calls/user', userId] });
-        }
+          // Only attempt reconnect if not manually closed and under attempt limit
+          if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
+            reconnectAttempts++;
+            console.log(`🔄 Attempting to reconnect... (${reconnectAttempts}/${maxReconnectAttempts})`);
+            
+            reconnectTimer = setTimeout(() => {
+              connect();
+            }, reconnectDelay);
+          } else if (reconnectAttempts >= maxReconnectAttempts) {
+            console.log('❌ Max reconnection attempts reached. Stopping reconnection.');
+          }
+        };
+        
+        websocket.onerror = (error) => {
+          console.error('❌ WebSocket error:', error);
+        };
+        
+        setWs(websocket);
+        
       } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
+        console.error('❌ Failed to create WebSocket connection:', error);
+        
+        // Retry connection after delay
+        if (reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          reconnectTimer = setTimeout(connect, reconnectDelay);
+        }
       }
     };
-    
-    websocket.onclose = () => {
-      console.log('WebSocket disconnected, attempting to reconnect...');
-      // Attempt to reconnect after 3 seconds
-      setTimeout(() => {
-        if (ws?.readyState === WebSocket.CLOSED) {
-          setWs(null);
-        }
-      }, 3000);
-    };
-    
-    websocket.onerror = (error) => {
-      console.error('WebSocket error:', error);
-    };
-    
-    setWs(websocket);
+
+    // Initial connection
+    connect();
     
     return () => {
-      websocket.close();
+      // Clear reconnection timer
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      
+      // Close WebSocket connection
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        websocket.close(1000, 'Component unmounting');
+      }
     };
-  }, [userId, queryClient, toast]);
+  }, [userId, queryClient, toast, setWs]);
 
 
 
@@ -372,9 +422,9 @@ export default function CallDashboard() {
   const [callNotes, setCallNotes] = useState("");
   const [callAction, setCallAction] = useState<"none" | "follow-up" | "call-back" | "discount">("none");
 
-  // Auto-refresh state
+  // Auto-refresh state - More aggressive for real-time updates
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
-  const [refreshInterval, setRefreshInterval] = useState(3); // minutes
+  const [refreshInterval, setRefreshInterval] = useState(0.5); // 30 seconds for real-time updates
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
   // Collapsible transcript state
@@ -443,22 +493,19 @@ export default function CallDashboard() {
     setFilteredCalls(result);
   }, [calls, searchQuery, sortBy, sortOrder, filterStatus, filterAction]);
 
-  // Auto-refresh effect
+  // Auto-refresh effect - Enhanced for real-time updates
   useEffect(() => {
     if (!autoRefreshEnabled) return;
 
     const intervalId = setInterval(async () => {
       try {
-        // Refresh call data
+        // Silently refresh call data without showing toast every time
         await refetch();
         setLastRefresh(new Date());
         
-        toast({
-          title: "Data Refreshed",
-          description: "Conversation data has been updated.",
-        });
+        console.log('📊 Auto-refreshed call data at', new Date().toLocaleTimeString());
       } catch (error) {
-        console.error("Auto-refresh error:", error);
+        console.error("❌ Auto-refresh error:", error);
       }
     }, refreshInterval * 60 * 1000); // Convert minutes to milliseconds
 

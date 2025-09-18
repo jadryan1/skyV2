@@ -928,11 +928,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // REMOVED: Raw body parsing middleware (no signature validation needed)
 
-  // ULTRA-SIMPLE USER3 WEBHOOK: No middleware, no validation, just logs payload
-  app.post('/api/twilio/webhook/user3', (req: Request, res: Response) => {
-    console.log('🎯 SIMPLE WEBHOOK - Body size:', JSON.stringify(req.body).length, 'bytes');
-    console.log('🎯 SIMPLE WEBHOOK - Webhook data:', req.body);
-    res.status(200).send('OK');
+  // ENHANCED USER3 WEBHOOK: With database processing and WebSocket broadcasting
+  app.post('/api/twilio/webhook/user3', async (req: Request, res: Response) => {
+    try {
+      console.log('🎯 ENHANCED USER3 WEBHOOK - Body size:', JSON.stringify(req.body).length, 'bytes');
+      console.log('🎯 ENHANCED USER3 WEBHOOK - Webhook data:', req.body);
+      
+      // Process the webhook with full functionality (database + WebSocket broadcasting)
+      const { twilioService } = await import("./twilioService");
+      await twilioService.processUser3CallWebhook(req.body);
+      
+      res.status(200).send('OK');
+    } catch (error) {
+      console.error('❌ USER3 WEBHOOK ERROR:', error);
+      res.status(500).send('Error processing User3 webhook');
+    }
   });
 
   // Optional: Even simpler version that just logs everything
