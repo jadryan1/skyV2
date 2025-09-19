@@ -1,14 +1,21 @@
-// server/index.ts - Debug version with extensive logging
+// server/index.ts - Fixed with ES6 imports and correct paths
 import express from 'express';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { existsSync, readdirSync } from 'fs'; // ES6 import instead of require
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Fix for ES modules __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 console.log('🚀 Starting server...');
 console.log('Environment:', process.env.NODE_ENV);
 console.log('Port:', PORT);
 console.log('Working directory:', process.cwd());
+console.log('__dirname:', __dirname);
 
 // Middleware with logging
 app.use((req, res, next) => {
@@ -19,16 +26,34 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Test endpoint first
-app.get('/test', (req, res) => {
-  console.log('Test endpoint hit');
-  res.json({ 
-    status: 'Server is working',
-    timestamp: new Date().toISOString(),
-    cwd: process.cwd(),
-    env: process.env.NODE_ENV
-  });
-});
+// Based on your build output, files are in dist/public/
+const publicPath = path.join(process.cwd(), 'dist', 'public');
+console.log('Looking for static files in:', publicPath);
+
+// Check if directories exist
+try {
+  if (existsSync(publicPath)) {
+    console.log('✅ dist/public directory exists');
+    const files = readdirSync(publicPath);
+    console.log('Files in dist/public:', files);
+    
+    if (existsSync(path.join(publicPath, 'index.html'))) {
+      console.log('✅ index.html found in dist/public');
+    } else {
+      console.log('❌ index.html NOT found in dist/public');
+    }
+  } else {
+    console.log('❌ dist/public directory does not exist');
+    
+    // Check if files are in dist/ instead
+    const distPath = path.join(process.cwd(), 'dist');
+    if (existsSync(distPath)) {
+      console.log('Checking dist/ directory:', readdirSync(distPath));
+    }
+  }
+} catch (error) {
+  console.error('Error checking directories:', error);
+}
 
 // Health check
 app.get('/health', (req, res) => {
@@ -37,70 +62,21 @@ app.get('/health', (req, res) => {
     status: 'healthy', 
     timestamp: new Date().toISOString(),
     port: PORT,
-    cwd: process.cwd()
+    publicPath,
+    files: existsSync(publicPath) ? readdirSync(publicPath) : 'Directory not found'
   });
 });
 
-// Your existing API routes (make sure these are imported correctly)
-// app.use('/api', yourApiRoutes);
-
-// Check if dist directory exists
-const distPath = path.join(process.cwd(), 'dist');
-console.log('Checking dist directory:', distPath);
-
-try {
-  const fs = require('fs');
-  if (fs.existsSync(distPath)) {
-    console.log('✅ dist directory exists');
-    const files = fs.readdirSync(distPath);
-    console.log('Files in dist:', files);
-    
-    if (fs.existsSync(path.join(distPath, 'index.html'))) {
-      console.log('✅ index.html found');
-    } else {
-      console.log('❌ index.html NOT found');
-    }
-  } else {
-    console.log('❌ dist directory does not exist');
-  }
-} catch (error) {
-  console.error('Error checking dist directory:', error);
-}
-
-// Serve static files with error handling
-app.use(express.static(distPath, {
-  fallthrough: true
-}));
-
-// Simple root route for testing
-app.get('/', (req, res) => {
-  console.log('Root route hit - attempting to serve index.html');
-  
-  try {
-    const indexPath = path.join(distPath, 'index.html');
-    console.log('Looking for index.html at:', indexPath);
-    
-    const fs = require('fs');
-    if (fs.existsSync(indexPath)) {
-      console.log('Serving index.html');
-      res.sendFile(indexPath);
-    } else {
-      console.log('index.html not found, sending error');
-      res.status(404).send(`
-        <h1>Build files not found</h1>
-        <p>Looking for: ${indexPath}</p>
-        <p>Working directory: ${process.cwd()}</p>
-        <p>Available routes:</p>
-        <ul>
-          <li><a href="/test">/test</a></li>
-          <li><a href="/health">/health</a></li>
-        </ul>
-      `);
-    }
-  } catch (error) {
-    console.error('Error in root route:', error);
-    res.status(500).send(`Server error: ${error.message}`);
-  }
+// Test endpoint
+app.get('/test', (req, res) => {
+  console.log('Test endpoint hit');
+  res.json({ 
+    status: 'Server is working',
+    timestamp: new Date().toISOString(),
+    cwd: process.cwd(),
+    publicPath,
+    indexExists: existsSync(path.join(publicPath, 'index.html'))
+  });
 });
 
 // Twilio webhook
@@ -115,10 +91,67 @@ app.post('/webhooks/twilio/call-status',
   }
 );
 
+// Your API routes would go here
+// app.use('/api', yourApiRoutes);
+
+// Serve static files from the correct location
+app.use(express.static(publicPath, {
+  fallthrough: true
+}));
+
+// Root route
+app.get('/', (req, res) => {
+  console.log('Root route hit - attempting to serve index.html');
+  
+  try {
+    const indexPath = path.join(publicPath, 'index.html');
+    console.log('Looking for index.html at:', indexPath);
+    
+    if (existsSync(indexPath)) {
+      console.log('Serving index.html');
+      res.sendFile(indexPath);
+    } else {
+      console.log('index.html not found, sending debug info');
+      res.status(404).send(`
+        <h1>Debug Info</h1>
+        <p><strong>Looking for:</strong> ${indexPath}</p>
+        <p><strong>Working directory:</strong> ${process.cwd()}</p>
+        <p><strong>Public path:</strong> ${publicPath}</p>
+        <p><strong>Public path exists:</strong> ${existsSync(publicPath)}</p>
+        <p><strong>Available routes:</strong></p>
+        <ul>
+          <li><a href="/test">/test</a></li>
+          <li><a href="/health">/health</a></li>
+        </ul>
+      `);
+    }
+  } catch (error) {
+    console.error('Error in root route:', error);
+    res.status(500).send(`Server error: ${error.message}`);
+  }
+});
+
+// Catch-all for React Router
+app.get('*', (req, res) => {
+  console.log('Catch-all route for:', req.path);
+  
+  try {
+    const indexPath = path.join(publicPath, 'index.html');
+    
+    if (existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send('App not found');
+    }
+  } catch (error) {
+    console.error('Error in catch-all route:', error);
+    res.status(500).send(`Server error: ${error.message}`);
+  }
+});
+
 // Error handling
 app.use((error, req, res, next) => {
   console.error('❌ Express Error:', error);
-  console.error('Stack:', error.stack);
   res.status(500).json({ 
     error: 'Internal server error',
     message: error.message,
@@ -126,17 +159,7 @@ app.use((error, req, res, next) => {
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  console.log('404 - Route not found:', req.path);
-  res.status(404).json({ 
-    error: 'Route not found',
-    path: req.path,
-    method: req.method
-  });
-});
-
-// Start server with error handling
+// Start server
 try {
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Server successfully started on port ${PORT}`);
