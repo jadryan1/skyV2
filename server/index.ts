@@ -138,6 +138,37 @@ app.get('/api/calls/user/:id', (req, res) => {
   });
 });
 
+app.post('/api/calls', (req, res) => {
+  console.log('Create call:', req.body);
+  res.json({
+    message: "Call created successfully",
+    data: {
+      id: Date.now(),
+      ...req.body,
+      createdAt: new Date().toISOString()
+    }
+  });
+});
+
+app.put('/api/calls/:id', (req, res) => {
+  console.log('Update call:', req.params.id, req.body);
+  res.json({
+    message: "Call updated successfully",
+    data: {
+      id: req.params.id,
+      ...req.body,
+      updatedAt: new Date().toISOString()
+    }
+  });
+});
+
+app.delete('/api/calls/:id', (req, res) => {
+  console.log('Delete call:', req.params.id);
+  res.json({
+    message: "Call deleted successfully"
+  });
+});
+
 app.get('/api/business/:id', (req, res) => {
   console.log('Get business:', req.params.id);
   res.json({
