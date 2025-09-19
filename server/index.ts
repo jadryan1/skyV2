@@ -1,369 +1,154 @@
-import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
-import path from "path";
-import fs from "fs";
-import https from "https";
-import http from "http";
-import WebSocket, { WebSocketServer } from "ws";
-import { wsManager, type WebSocketClient } from "./wsManager";
-
-// SSL certificate has been updated - normal TLS validation restored
-
-// CONFIGURATION: AI SERVICES DISABLED FOR RAW DATA COLLECTION
-console.log('🚫 ==========================================');
-console.log('🚫 AI SERVICES DISABLED');
-console.log('🚫 RAW CALL DATA COLLECTION MODE ACTIVE');
-console.log('🚫 NO PROCESSING, FILTERING, OR AI ANALYSIS');
-console.log('🚫 ==========================================');
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-// Handle uncaught exceptions  
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  process.exit(1);
-});
+// server/index.ts - Debug version with extensive logging
+import express from 'express';
+import path from 'path';
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
+console.log('🚀 Starting server...');
+console.log('Environment:', process.env.NODE_ENV);
+console.log('Port:', PORT);
+console.log('Working directory:', process.cwd());
 
-// BODY PARSER CONFIGURATION - MUST BE BEFORE ROUTES
-// Configure body parsers with larger limits for Twilio webhooks
-// This must come BEFORE any routes that need to parse request bodies
-
-// For JSON payloads (like webhooks) - Apply globally first
-app.use(express.json({ 
-  limit: '2mb',  // Increased from default 100kb to handle large Twilio payloads
-  verify: (req: any, res, buf) => {
-    // Store raw body for signature verification
-    req.rawBody = buf;
-  }
-}));
-
-// For URL-encoded form data (Twilio also uses this format)
-app.use(express.urlencoded({ 
-  limit: '2mb', 
-  extended: true,
-  verify: (req: any, res, buf) => {
-    // Store raw body for signature verification
-    req.rawBody = buf;
-  }
-}));
-
-// Specific configuration for Twilio webhook routes to ensure larger limits
-// Apply these BEFORE routes to override the global settings
-app.use('/api/twilio', express.json({ 
-  limit: '2mb',
-  verify: (req: any, res, buf) => { 
-    req.rawBody = buf;
-    console.log(`🔍 Twilio JSON webhook body length: ${buf.length} bytes`);
-  }
-}));
-app.use('/api/twilio', express.urlencoded({ 
-  limit: '2mb', 
-  extended: true,
-  verify: (req: any, res, buf) => { 
-    req.rawBody = buf;
-    console.log(`🔍 Twilio URL-encoded webhook body length: ${buf.length} bytes`);
-  }
-}));
-
-// Raw body parser for webhook signature verification
-app.use('/api/twilio/webhook', express.raw({ 
-  type: 'application/x-www-form-urlencoded',
-  limit: '2mb',
-  verify: (req: any, res, buf) => {
-    req.rawBody = buf.toString('utf8');
-    console.log(`🔍 Raw Twilio webhook body: ${req.rawBody}`);
-    
-    // Parse the body manually for Twilio webhooks
-    const urlencoded = new URLSearchParams(req.rawBody);
-    req.body = Object.fromEntries(urlencoded);
-    console.log(`🔍 Parsed Twilio webhook body:`, req.body);
-  }
-}));
-
-// TEST ROUTE: Verify body parser configuration is working with 2MB limits
-app.post('/api/test-body-limit', (req, res) => {
-  console.log("🧪 Body parser test - received body size:", JSON.stringify(req.body).length, "bytes");
-  res.json({ 
-    message: "Body parser working", 
-    bodySize: JSON.stringify(req.body).length 
-  });
-});
-
+// Middleware with logging
 app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
-    }
-  });
-
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
 });
 
-  // SECURITY: Middleware to handle Replit host restrictions - DEVELOPMENT ONLY
-  if (process.env.NODE_ENV === 'development') {
-    app.use((req, res, next) => {
-      const host = req.headers.host;
-      if (host && host.endsWith('.replit.dev')) {
-        // Preserve original host for logging
-        req.headers['x-original-host'] = host;
-        // Normalize host to bypass Vite's allowedHosts restriction
-        req.headers.host = 'localhost';
-      }
-      next();
-    });
-  }
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-(async () => {
-  try {
-    log('🚀 Starting server initialization...');
-    const server = await registerRoutes(app);
-
-  // Setup WebSocket server alongside Express
-  const wss = new WebSocketServer({ server });
-
-  wss.on('connection', (ws: WebSocketClient, req) => {
-    log('New WebSocket connection established');
-
-    // Initialize client properties
-    ws.isAlive = true;
-    wsManager.addClient(ws);
-
-    // Handle pong responses
-    ws.on('pong', () => {
-      ws.isAlive = true;
-    });
-
-    // SECURITY: Handle incoming messages with authentication verification
-    ws.on('message', async (data: WebSocket.Data) => {
-      try {
-        const message = JSON.parse(data.toString());
-
-        if (message.type === 'subscribe' && message.userId && message.token) {
-          // SECURITY: Verify user authentication before allowing subscription
-          const userId = parseInt(message.userId);
-          const token = message.token;
-
-          // Basic token validation - in a real app this would verify JWT or session
-          // For now, we'll validate that the userId matches what's stored in localStorage
-          // TODO: Implement proper JWT verification or session validation
-          if (isNaN(userId) || !token || token.length < 10) {
-            log(`WebSocket authentication failed for user ${userId}`);
-            ws.send(JSON.stringify({
-              type: 'auth_error',
-              message: 'Invalid authentication token',
-              timestamp: new Date().toISOString()
-            }));
-            return;
-          }
-
-          // SECURITY: Verify user exists and token is valid
-          try {
-            const { storage } = await import('./storage');
-            const user = await storage.getUser(userId);
-            if (!user) {
-              log(`WebSocket subscription denied - user ${userId} not found`);
-              ws.send(JSON.stringify({
-                type: 'auth_error',
-                message: 'User not found',
-                timestamp: new Date().toISOString()
-              }));
-              return;
-            }
-
-            // SECURITY: Set userId only after successful authentication
-            ws.userId = userId;
-            log(`WebSocket client authenticated and subscribed for user ${ws.userId}`);
-
-            // Send confirmation with user verification
-            ws.send(JSON.stringify({
-              type: 'subscription_confirmed',
-              userId: ws.userId,
-              userEmail: user.email,
-              timestamp: new Date().toISOString()
-            }));
-          } catch (error) {
-            log(`Error verifying WebSocket user: ${error}`);
-            ws.send(JSON.stringify({
-              type: 'auth_error',
-              message: 'Authentication verification failed',
-              timestamp: new Date().toISOString()
-            }));
-          }
-        } else if (message.type === 'ping') {
-          // Respond to client ping
-          ws.send(JSON.stringify({
-            type: 'pong',
-            timestamp: new Date().toISOString()
-          }));
-        } else {
-          // SECURITY: Reject messages without proper authentication
-          log('WebSocket message rejected - missing userId or token');
-          ws.send(JSON.stringify({
-            type: 'auth_error',
-            message: 'Authentication required',
-            timestamp: new Date().toISOString()
-          }));
-        }
-      } catch (error) {
-        log(`Error parsing WebSocket message: ${error}`);
-        ws.send(JSON.stringify({
-          type: 'error',
-          message: 'Invalid message format',
-          timestamp: new Date().toISOString()
-        }));
-      }
-    });
-
-    // Handle client disconnect
-    ws.on('close', () => {
-      log(`WebSocket client disconnected ${ws.userId ? `(user ${ws.userId})` : ''}`);
-      wsManager.removeClient(ws);
-    });
-
-    // Handle WebSocket errors
-    ws.on('error', (error) => {
-      log(`WebSocket error: ${error}`);
-      wsManager.removeClient(ws);
-    });
+// Test endpoint first
+app.get('/test', (req, res) => {
+  console.log('Test endpoint hit');
+  res.json({ 
+    status: 'Server is working',
+    timestamp: new Date().toISOString(),
+    cwd: process.cwd(),
+    env: process.env.NODE_ENV
   });
-
-  // Ping clients every 30 seconds to keep connections alive
-  const pingInterval = setInterval(() => {
-    wsManager.cleanup();
-  }, 30000);
-
-  // Cleanup on server shutdown
-  process.on('SIGINT', () => {
-    clearInterval(pingInterval);
-    wss.close();
-  });
-
-  log(`WebSocket server initialized. Ready for real-time call updates.`);
-
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-
-    console.error("Express error handler:", err);
-
-    if (!res.headersSent) {
-      res.status(status).json({ message });
-    }
-    // Don't throw the error again to prevent unhandled rejections
-  });
-
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (process.env.NODE_ENV !== "production") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
-
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
-
-  // Optimize SSL certificate loading - use HTTP for faster startup in development
-  // SSL can be handled by reverse proxy in production
-  let serverInstance;
-
-  // Disable SSL for faster startup - deployment environments handle SSL via reverse proxy
-  const useSSL = false;
-
-  if (useSSL) {
-    const certPath = path.join(process.cwd(), 'attached_assets', 'domain.cert_1756860116174.pem');
-    const keyPath = path.join(process.cwd(), 'attached_assets', 'private.key_1756860116174.pem');
-
-    if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
-      try {
-        const httpsOptions = {
-          cert: fs.readFileSync(certPath, 'utf8'),
-          key: fs.readFileSync(keyPath, 'utf8')
-        };
-        serverInstance = https.createServer(httpsOptions, app);
-        log("HTTPS server configured with SSL certificates");
-      } catch (error) {
-        log(`SSL certificate error: ${error instanceof Error ? error.message : 'Unknown error'}, falling back to HTTP`);
-        serverInstance = http.createServer(app);
-      }
-    } else {
-      log("SSL certificates not found, using HTTP server");
-      serverInstance = http.createServer(app);
-    }
-  } else {
-    // Use HTTP for faster startup - SSL handled by reverse proxy if needed
-    serverInstance = http.createServer(app);
-    log("HTTP server configured for optimized startup");
-  }
-
-  // Handle WebSocket upgrade for HMR with Replit domains
-  serverInstance.on('upgrade', (req, socket, head) => {
-    const host = req.headers.host;
-    if (host && host.endsWith('.replit.dev')) {
-      // Preserve original host for logging
-      req.headers['x-original-host'] = host;
-      // Normalize host to bypass Vite's allowedHosts restriction
-      req.headers.host = 'localhost';
-    }
-  });
-
-  serverInstance.listen(port, "0.0.0.0", () => {
-    log(`serving on port ${port}`);
-    log('✅ Server startup completed successfully');
-  });
-
-  } catch (error) {
-    console.error('❌ Critical server startup error:', error);
-    console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace available');
-
-    // Log detailed error information for debugging
-    if (error instanceof Error) {
-      console.error('Error name:', error.name);
-      console.error('Error message:', error.message);
-    }
-
-    // Give the system a moment to flush logs before exiting
-    setTimeout(() => {
-      console.error('🚫 Server startup failed. Exiting with error code 1.');
-      process.exit(1);
-    }, 100);
-  }
-})().catch((unhandledError) => {
-  console.error('💥 Unhandled async error during server startup:', unhandledError);
-  console.error('Stack trace:', unhandledError instanceof Error ? unhandledError.stack : 'No stack trace available');
-
-  setTimeout(() => {
-    console.error('🚫 Critical failure. Exiting with error code 1.');
-    process.exit(1);
-  }, 100);
 });
+
+// Health check
+app.get('/health', (req, res) => {
+  console.log('Health check endpoint hit');
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    port: PORT,
+    cwd: process.cwd()
+  });
+});
+
+// Your existing API routes (make sure these are imported correctly)
+// app.use('/api', yourApiRoutes);
+
+// Check if dist directory exists
+const distPath = path.join(process.cwd(), 'dist');
+console.log('Checking dist directory:', distPath);
+
+try {
+  const fs = require('fs');
+  if (fs.existsSync(distPath)) {
+    console.log('✅ dist directory exists');
+    const files = fs.readdirSync(distPath);
+    console.log('Files in dist:', files);
+    
+    if (fs.existsSync(path.join(distPath, 'index.html'))) {
+      console.log('✅ index.html found');
+    } else {
+      console.log('❌ index.html NOT found');
+    }
+  } else {
+    console.log('❌ dist directory does not exist');
+  }
+} catch (error) {
+  console.error('Error checking dist directory:', error);
+}
+
+// Serve static files with error handling
+app.use(express.static(distPath, {
+  fallthrough: true
+}));
+
+// Simple root route for testing
+app.get('/', (req, res) => {
+  console.log('Root route hit - attempting to serve index.html');
+  
+  try {
+    const indexPath = path.join(distPath, 'index.html');
+    console.log('Looking for index.html at:', indexPath);
+    
+    const fs = require('fs');
+    if (fs.existsSync(indexPath)) {
+      console.log('Serving index.html');
+      res.sendFile(indexPath);
+    } else {
+      console.log('index.html not found, sending error');
+      res.status(404).send(`
+        <h1>Build files not found</h1>
+        <p>Looking for: ${indexPath}</p>
+        <p>Working directory: ${process.cwd()}</p>
+        <p>Available routes:</p>
+        <ul>
+          <li><a href="/test">/test</a></li>
+          <li><a href="/health">/health</a></li>
+        </ul>
+      `);
+    }
+  } catch (error) {
+    console.error('Error in root route:', error);
+    res.status(500).send(`Server error: ${error.message}`);
+  }
+});
+
+// Twilio webhook
+app.post('/webhooks/twilio/call-status', 
+  express.urlencoded({ extended: false }), 
+  (req, res) => {
+    console.log('Twilio webhook received');
+    console.log('Body:', req.body);
+    
+    res.type('text/xml');
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  }
+);
+
+// Error handling
+app.use((error, req, res, next) => {
+  console.error('❌ Express Error:', error);
+  console.error('Stack:', error.stack);
+  res.status(500).json({ 
+    error: 'Internal server error',
+    message: error.message,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  console.log('404 - Route not found:', req.path);
+  res.status(404).json({ 
+    error: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
+});
+
+// Start server with error handling
+try {
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Server successfully started on port ${PORT}`);
+    console.log(`🌐 Access at: https://aidash-upga.onrender.com`);
+    console.log(`🏥 Health check: https://aidash-upga.onrender.com/health`);
+    console.log(`🧪 Test endpoint: https://aidash-upga.onrender.com/test`);
+  });
+
+  server.on('error', (error) => {
+    console.error('❌ Server error:', error);
+  });
+} catch (error) {
+  console.error('❌ Failed to start server:', error);
+  process.exit(1);
+}
