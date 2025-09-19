@@ -91,8 +91,68 @@ app.post('/webhooks/twilio/call-status',
   }
 );
 
-// Your API routes would go here
-// app.use('/api', yourApiRoutes);
+// Import your existing API routes (adjust paths as needed)
+// You need to find where these are defined and import them
+// Example imports:
+// import authRoutes from './routes/auth.js';
+// import callsRoutes from './routes/calls.js';
+// import businessRoutes from './routes/business.js';
+
+// Temporary API routes for testing - replace with your actual routes
+app.post('/api/auth/login', (req, res) => {
+  console.log('Login attempt:', req.body);
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password required' });
+  }
+  
+  // Replace this with your actual authentication logic
+  res.json({
+    message: 'Login successful',
+    user: {
+      id: 3,
+      email: email,
+      name: 'Test User'
+    }
+  });
+});
+
+app.get('/api/auth/user/:id', (req, res) => {
+  console.log('Get user:', req.params.id);
+  res.json({
+    data: {
+      id: parseInt(req.params.id),
+      email: "audamaur@gmail.com",
+      name: "Test User"
+    }
+  });
+});
+
+app.get('/api/calls/user/:id', (req, res) => {
+  console.log('Get calls for user:', req.params.id);
+  res.json({
+    message: "Calls retrieved successfully",
+    data: [],
+    total: 0
+  });
+});
+
+app.get('/api/business/:id', (req, res) => {
+  console.log('Get business:', req.params.id);
+  res.json({
+    data: {
+      id: 13,
+      userId: parseInt(req.params.id),
+      businessName: "Test Business"
+    }
+  });
+});
+
+// Add your actual API routes here:
+// app.use('/api/auth', authRoutes);
+// app.use('/api/calls', callsRoutes);
+// app.use('/api/business', businessRoutes);
 
 // Serve static files from the correct location
 app.use(express.static(publicPath, {
