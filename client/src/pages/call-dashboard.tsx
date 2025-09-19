@@ -1030,17 +1030,27 @@ For support: https://skyiq.app
                   <Button 
                     variant="outline"
                     onClick={async () => {
-                      await refetch();
-                      toast({
-                        title: "Calls Refreshed",
-                        description: "Call data has been updated from the server.",
-                      });
+                      // If there are more calls available, load the next page
+                      if (hasMore) {
+                        handleNextPage();
+                        toast({
+                          title: "Loading Previous Calls",
+                          description: `Loading older calls (page ${currentPage + 1})...`,
+                        });
+                      } else {
+                        // If no more calls, just refresh current page for any new calls
+                        await refetch();
+                        toast({
+                          title: "Calls Refreshed",
+                          description: "Call data has been updated from the server.",
+                        });
+                      }
                     }}
                     disabled={isLoading}
                     data-testid="button-refresh-calls"
                   >
                     <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                    Refresh Calls
+                    {hasMore ? 'Load Previous Calls' : 'Refresh Calls'}
                   </Button>
                 </div>
               </div>
