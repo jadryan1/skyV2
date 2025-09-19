@@ -248,6 +248,23 @@ app.post('/webhooks/elevenlabs/conversation',
   }
 );
 
+// GET handlers for webhook testing
+app.get('/webhooks/elevenlabs/conversation', (req, res) => {
+  res.json({ 
+    message: 'ElevenLabs webhook endpoint is ready',
+    method: 'POST required',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/webhooks/twilio/call-status', (req, res) => {
+  res.json({ 
+    message: 'Twilio webhook endpoint is ready', 
+    method: 'POST required',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // API Routes
 app.post('/api/auth/login', async (req, res) => {
   try {
