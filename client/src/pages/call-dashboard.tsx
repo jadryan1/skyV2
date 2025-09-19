@@ -234,14 +234,6 @@ export default function CallDashboard() {
       const response = await apiRequest('GET', `/api/calls/user/${userId}?limit=${limit}&offset=${currentOffset}`);
       const data = await response.json();
 
-      // Update pagination state from API response
-      if (data.totalCount !== undefined) {
-        setTotalCount(data.totalCount);
-      }
-      if (data.hasMore !== undefined) {
-        setHasMore(data.hasMore);
-      }
-
       // If we have database calls, use them
       if (data.data?.length > 0) {
         return data;
@@ -265,14 +257,6 @@ export default function CallDashboard() {
           const freshResponse = await apiRequest('GET', `/api/calls/user/${userId}?limit=${limit}&offset=${currentOffset}`);
           const freshData = await freshResponse.json();
           
-          // Update pagination state
-          if (freshData.totalCount !== undefined) {
-            setTotalCount(freshData.totalCount);
-          }
-          if (freshData.hasMore !== undefined) {
-            setHasMore(freshData.hasMore);
-          }
-          
           return freshData;
         } catch (error) {
           console.error("Error seeding initial calls:", error);
@@ -286,6 +270,18 @@ export default function CallDashboard() {
     staleTime: 0, // Consider data stale immediately
     gcTime: 0     // Disable caching to always fetch fresh data
   });
+
+  // Update pagination state when callsResponse changes (fixes infinite loop)
+  useEffect(() => {
+    if (callsResponse) {
+      if (callsResponse.totalCount !== undefined) {
+        setTotalCount(callsResponse.totalCount);
+      }
+      if (callsResponse.hasMore !== undefined) {
+        setHasMore(callsResponse.hasMore);
+      }
+    }
+  }, [callsResponse]);
 
   // Extract calls data from the paginated response
   const callsData = callsResponse?.data || [];
