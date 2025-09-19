@@ -15,7 +15,7 @@ import clientApiRoutes from "./routes/clientApi";
 import apiKeyRoutes from "./routes/apiKeyRoutes";
 import ragRoutes from "./routes/ragRoutes";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import crypto from "crypto";
 import twilio from "twilio";
 
@@ -870,6 +870,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // Get calls by user ID - SECURE: Only returns calls for the specified user
+  // Supports pagination with limit and offset query parameters
   app.get("/api/calls/user/:userId", async (req: Request, res: Response) => {
     try {
       const userId = parseInt(req.params.userId);
@@ -877,17 +878,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid user ID" });
       }
       
+      // Parse pagination parameters
+      const limit = parseInt(req.query.limit as string) || 20; // Default to 20 calls per page
+      const offset = parseInt(req.query.offset as string) || 0; // Default to start from beginning
+      
+      // Validate pagination parameters
+      if (limit < 1 || limit > 100) {
+        return res.status(400).json({ message: "Limit must be between 1 and 100" });
+      }
+      if (offset < 0) {
+        return res.status(400).json({ message: "Offset must be non-negative" });
+      }
+      
+      // Get total count first
+      const totalCountResult = await db.select({ count: sql<number>`count(*)` }).from(calls)
+        .where(eq(calls.userId, userId));
+      const totalCount = totalCountResult[0]?.count || 0;
+      
       // SECURITY: Only fetch calls that belong to this specific user
+      // Order by createdAt DESC to get newest calls first, then apply pagination
       const result = await db.select().from(calls)
         .where(eq(calls.userId, userId))
-        .orderBy(calls.createdAt);
+        .orderBy(desc(calls.createdAt))
+        .limit(limit)
+        .offset(offset);
       
-      console.log(`Retrieved ${result.length} calls for user ${userId}`);
+      console.log(`Retrieved ${result.length} calls for user ${userId} (limit: ${limit}, offset: ${offset}, total: ${totalCount})`);
       
       res.status(200).json({ 
         message: "Calls retrieved successfully", 
         data: result,
-        count: result.length
+        count: result.length,
+        totalCount,
+        limit,
+        offset,
+        hasMore: offset + result.length < totalCount
       });
     } catch (error) {
       console.error("Error fetching calls:", error);
