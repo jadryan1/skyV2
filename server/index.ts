@@ -1,23 +1,27 @@
-// server/index.ts - Fixed with ES6 imports and correct paths
+// server/index.ts - Use your real database system
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, readdirSync } from 'fs'; // ES6 import instead of require
+import { existsSync } from 'fs';
+
+// Import your real routes and database functions
+import { registerRoutes } from './routes'; // Adjust path to your main routes file
+import { storage } from './storage';
+import { db } from './db';
+import { eq, desc, sql } from 'drizzle-orm';
+import { calls } from '@shared/schema';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Fix for ES modules __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 console.log('🚀 Starting server...');
 console.log('Environment:', process.env.NODE_ENV);
 console.log('Port:', PORT);
-console.log('Working directory:', process.cwd());
-console.log('__dirname:', __dirname);
 
-// Middleware with logging
+// Middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
   next();
@@ -26,201 +30,201 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Based on your build output, files are in dist/public/
-const publicPath = path.join(process.cwd(), 'dist', 'public');
-console.log('Looking for static files in:', publicPath);
-
-// Check if directories exist
-try {
-  if (existsSync(publicPath)) {
-    console.log('✅ dist/public directory exists');
-    const files = readdirSync(publicPath);
-    console.log('Files in dist/public:', files);
-    
-    if (existsSync(path.join(publicPath, 'index.html'))) {
-      console.log('✅ index.html found in dist/public');
-    } else {
-      console.log('❌ index.html NOT found in dist/public');
-    }
-  } else {
-    console.log('❌ dist/public directory does not exist');
-    
-    // Check if files are in dist/ instead
-    const distPath = path.join(process.cwd(), 'dist');
-    if (existsSync(distPath)) {
-      console.log('Checking dist/ directory:', readdirSync(distPath));
-    }
-  }
-} catch (error) {
-  console.error('Error checking directories:', error);
-}
-
 // Health check
 app.get('/health', (req, res) => {
-  console.log('Health check endpoint hit');
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    port: PORT,
-    publicPath,
-    files: existsSync(publicPath) ? readdirSync(publicPath) : 'Directory not found'
+    port: PORT
   });
 });
 
-// Test endpoint
-app.get('/test', (req, res) => {
-  console.log('Test endpoint hit');
-  res.json({ 
-    status: 'Server is working',
-    timestamp: new Date().toISOString(),
-    cwd: process.cwd(),
-    publicPath,
-    indexExists: existsSync(path.join(publicPath, 'index.html'))
-  });
-});
-
-// Twilio webhook
+// Enhanced Twilio webhook for real-time call logging
 app.post('/webhooks/twilio/call-status', 
   express.urlencoded({ extended: false }), 
-  (req, res) => {
-    console.log('Twilio webhook received');
-    console.log('Body:', req.body);
-    
-    res.type('text/xml');
-    res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  async (req, res) => {
+    try {
+      console.log('Twilio webhook received');
+      console.log('Body:', req.body);
+      
+      const {
+        CallSid,
+        CallStatus,
+        From,
+        To,
+        Direction,
+        Duration,
+        CallDuration,
+        StartTime,
+        EndTime,
+        CalledCity,
+        CallerCity
+      } = req.body;
+
+      console.log('📞 Call Event:', {
+        CallSid,
+        CallStatus,
+        From,
+        To,
+        Direction,
+        Duration: Duration || CallDuration
+      });
+
+      // Map Twilio status to your database enum
+      const mapStatus = (status: string) => {
+        switch (status?.toLowerCase()) {
+          case 'completed': return 'completed';
+          case 'ringing':
+          case 'answered': 
+          case 'in-progress': return 'in-progress';
+          case 'busy':
+          case 'no-answer': return 'missed';
+          default: return 'failed';
+        }
+      };
+
+      const dbStatus = mapStatus(CallStatus);
+      const callDuration = Duration ? parseInt(Duration) : (CallDuration ? parseInt(CallDuration) : null);
+
+      // For user 3, we'll map the phone number you're using
+      // You can expand this logic for other users
+      let userId = null;
+      
+      // Check if this is for user 3's known phone number
+      if (To === '+16156565526' || From === '+16156565526') {
+        userId = 3;
+      }
+      
+      if (userId) {
+        // Check if call already exists
+        const existingCall = await db.select()
+          .from(calls)
+          .where(eq(calls.twilioCallSid, CallSid))
+          .limit(1);
+
+        if (existingCall.length > 0) {
+          // Update existing call
+          await db.update(calls)
+            .set({
+              status: dbStatus,
+              duration: callDuration,
+              endTime: EndTime ? new Date(EndTime) : null
+            })
+            .where(eq(calls.id, existingCall[0].id));
+          
+          console.log(`✅ Updated call ${existingCall[0].id} for user ${userId}`);
+        } else {
+          // Create new call
+          const [newCall] = await db.insert(calls).values({
+            userId: userId,
+            twilioCallSid: CallSid,
+            phoneNumber: Direction === 'inbound' ? From : To,
+            duration: callDuration,
+            status: dbStatus,
+            direction: Direction === 'inbound' ? 'inbound' : 'outbound',
+            startTime: StartTime ? new Date(StartTime) : new Date(),
+            endTime: EndTime ? new Date(EndTime) : null,
+            createdAt: new Date(),
+            notes: `Auto-logged from Twilio - ${CallerCity || CalledCity || 'Unknown location'}`,
+            isFromTwilio: true
+          }).returning();
+          
+          console.log(`✅ Created call ${newCall.id} for user ${userId}`);
+        }
+      } else {
+        console.log(`❌ No user mapping for phone numbers: ${From} → ${To}`);
+      }
+
+      res.type('text/xml');
+      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      
+    } catch (error) {
+      console.error('❌ Webhook error:', error);
+      res.type('text/xml');
+      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
   }
 );
 
-// Import your existing API routes (adjust paths as needed)
-// You need to find where these are defined and import them
-// Example imports:
-// import authRoutes from './routes/auth.js';
-// import callsRoutes from './routes/calls.js';
-// import businessRoutes from './routes/business.js';
-
-// Temporary API routes for testing - replace with your actual routes
-app.post('/api/auth/login', (req, res) => {
-  console.log('Login attempt:', req.body);
-  const { email, password } = req.body;
+// Register all your real routes (auth, business, calls, etc.)
+try {
+  await registerRoutes(app);
+  console.log('✅ All routes registered successfully');
+} catch (error) {
+  console.error('❌ Error registering routes:', error);
   
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
-  }
-  
-  // Replace this with your actual authentication logic
-  res.json({
-    message: 'Login successful',
-    user: {
-      id: 3,
-      email: email,
-      name: 'Test User'
+  // Fallback: Add essential routes manually if registerRoutes fails
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const user = await storage.validateUserCredentials(req.body);
+      if (!user) {
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      const { password, ...userWithoutPassword } = user;
+      res.json({ message: 'Login successful', user: userWithoutPassword });
+    } catch (error) {
+      res.status(500).json({ message: 'Login failed' });
     }
   });
-});
 
-app.get('/api/auth/user/:id', (req, res) => {
-  console.log('Get user:', req.params.id);
-  res.json({
-    data: {
-      id: parseInt(req.params.id),
-      email: "audamaur@gmail.com",
-      name: "Test User"
+  app.get('/api/auth/user/:id', async (req, res) => {
+    try {
+      const user = await storage.getUser(parseInt(req.params.id));
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      const { password, ...userWithoutPassword } = user;
+      res.json({ data: userWithoutPassword });
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to fetch user' });
     }
   });
-});
 
-app.get('/api/calls/user/:id', (req, res) => {
-  console.log('Get calls for user:', req.params.id);
-  res.json({
-    message: "Calls retrieved successfully",
-    data: [],
-    total: 0
-  });
-});
-
-app.post('/api/calls', (req, res) => {
-  console.log('Create call:', req.body);
-  res.json({
-    message: "Call created successfully",
-    data: {
-      id: Date.now(),
-      ...req.body,
-      createdAt: new Date().toISOString()
+  app.get('/api/calls/user/:userId', async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      const limit = parseInt(req.query.limit as string) || 20;
+      const offset = parseInt(req.query.offset as string) || 0;
+      
+      const totalCountResult = await db.select({ count: sql<number>`count(*)` })
+        .from(calls)
+        .where(eq(calls.userId, userId));
+      const totalCount = totalCountResult[0]?.count || 0;
+      
+      const result = await db.select()
+        .from(calls)
+        .where(eq(calls.userId, userId))
+        .orderBy(desc(calls.createdAt))
+        .limit(limit)
+        .offset(offset);
+      
+      console.log(`Retrieved ${result.length} calls for user ${userId}`);
+      
+      res.json({ 
+        message: 'Calls retrieved successfully', 
+        data: result,
+        totalCount,
+        limit,
+        offset
+      });
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to fetch calls' });
     }
   });
-});
 
-app.put('/api/calls/:id', (req, res) => {
-  console.log('Update call:', req.params.id, req.body);
-  res.json({
-    message: "Call updated successfully",
-    data: {
-      id: req.params.id,
-      ...req.body,
-      updatedAt: new Date().toISOString()
+  app.get('/api/business/:id', async (req, res) => {
+    try {
+      const business = await storage.getBusinessInfo(parseInt(req.params.id));
+      res.json({ data: business });
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to fetch business' });
     }
   });
-});
+}
 
-app.delete('/api/calls/:id', (req, res) => {
-  console.log('Delete call:', req.params.id);
-  res.json({
-    message: "Call deleted successfully"
-  });
-});
-
-app.get('/api/business/:id', (req, res) => {
-  console.log('Get business:', req.params.id);
-  res.json({
-    data: {
-      id: 13,
-      userId: parseInt(req.params.id),
-      businessName: "Test Business"
-    }
-  });
-});
-
-// Add your actual API routes here:
-// app.use('/api/auth', authRoutes);
-// app.use('/api/calls', callsRoutes);
-// app.use('/api/business', businessRoutes);
-
-// Serve static files from the correct location
-app.use(express.static(publicPath, {
-  fallthrough: true
-}));
-
-// Root route
-app.get('/', (req, res) => {
-  console.log('Root route hit - attempting to serve index.html');
-  
-  try {
-    const indexPath = path.join(publicPath, 'index.html');
-    console.log('Looking for index.html at:', indexPath);
-    
-    if (existsSync(indexPath)) {
-      console.log('Serving index.html');
-      res.sendFile(indexPath);
-    } else {
-      console.log('index.html not found, sending debug info');
-      res.status(404).send(`
-        <h1>Debug Info</h1>
-        <p><strong>Looking for:</strong> ${indexPath}</p>
-        <p><strong>Working directory:</strong> ${process.cwd()}</p>
-        <p><strong>Public path:</strong> ${publicPath}</p>
-        <p><strong>Public path exists:</strong> ${existsSync(publicPath)}</p>
-        <p><strong>Available routes:</strong></p>
-        <ul>
-          <li><a href="/test">/test</a></li>
-          <li><a href="/health">/health</a></li>
-        </ul>
-      `);
-    }
-  } catch (error) {
-    console.error('Error in root route:', error);
-    res.status(500).send(`Server error: ${error.message}`);
-  }
-});
+// Static files
+const publicPath = path.join(process.cwd(), 'dist', 'public');
+app.use(express.static(publicPath, { fallthrough: true }));
 
 // Catch-all for React Router
 app.get('*', (req, res) => {
@@ -245,24 +249,17 @@ app.use((error, req, res, next) => {
   console.error('❌ Express Error:', error);
   res.status(500).json({ 
     error: 'Internal server error',
-    message: error.message,
-    timestamp: new Date().toISOString()
+    message: error.message
   });
 });
 
 // Start server
-try {
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Server successfully started on port ${PORT}`);
-    console.log(`🌐 Access at: https://aidash-upga.onrender.com`);
-    console.log(`🏥 Health check: https://aidash-upga.onrender.com/health`);
-    console.log(`🧪 Test endpoint: https://aidash-upga.onrender.com/test`);
-  });
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server started on port ${PORT}`);
+  console.log(`🌐 https://aidash-upga.onrender.com`);
+  console.log(`📞 Webhook: https://aidash-upga.onrender.com/webhooks/twilio/call-status`);
+});
 
-  server.on('error', (error) => {
-    console.error('❌ Server error:', error);
-  });
-} catch (error) {
-  console.error('❌ Failed to start server:', error);
-  process.exit(1);
-}
+server.on('error', (error) => {
+  console.error('❌ Server error:', error);
+});
