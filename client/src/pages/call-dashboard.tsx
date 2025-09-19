@@ -28,6 +28,15 @@ import {
 import AudioWave from "@/components/audio-wave";
 import SkyIQText from "@/components/skyiq-text";
 import UserAvatar from "@/components/user-avatar";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 
 import {
   Table,
@@ -186,6 +195,12 @@ export default function CallDashboard() {
   // Get current user ID from localStorage
   const userId = Number(localStorage.getItem('userId')) || 1;
 
+  // Pagination state (moved above useQuery to avoid reference before declaration)
+  const [currentOffset, setCurrentOffset] = useState(0);
+  const [limit] = useState(20); // Fixed page size
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
   // Load business profile data to get the logo
   const [businessLogo, setBusinessLogo] = useState<string | null>(null);
   const [businessName, setBusinessName] = useState<string>("");
@@ -212,44 +227,68 @@ export default function CallDashboard() {
     fetchBusinessData();
   }, [userId]);
 
-  // Use React Query to manage calls data with proper caching and refresh
-  const { data: callsData, isLoading, refetch } = useQuery({
-    queryKey: ['/api/calls/user', userId],
+  // Use React Query to manage calls data with pagination support
+  const { data: callsResponse, isLoading, refetch } = useQuery({
+    queryKey: ['/api/calls/user', userId, currentOffset, limit],
     queryFn: async () => {
-      const response = await apiRequest('GET', `/api/calls/user/${userId}`);
+      const response = await apiRequest('GET', `/api/calls/user/${userId}?limit=${limit}&offset=${currentOffset}`);
       const data = await response.json();
+
+      // Update pagination state from API response
+      if (data.totalCount !== undefined) {
+        setTotalCount(data.totalCount);
+      }
+      if (data.hasMore !== undefined) {
+        setHasMore(data.hasMore);
+      }
 
       // If we have database calls, use them
       if (data.data?.length > 0) {
-        return data.data;
+        return data;
       }
 
-      // If no calls in database yet, seed with placeholder data
-      try {
-        // Upload placeholder calls to the database for this user
-        const seedPromises = placeholderCalls.map(call => 
-          apiRequest("POST", "/api/calls", {
-            ...call,
-            userId
-          })
-        );
+      // If no calls in database yet, seed with placeholder data (only on first page)
+      if (currentOffset === 0) {
+        try {
+          // Upload placeholder calls to the database for this user
+          const seedPromises = placeholderCalls.map(call => 
+            apiRequest("POST", "/api/calls", {
+              ...call,
+              userId
+            })
+          );
 
-        // Wait for all calls to be created
-        await Promise.all(seedPromises);
+          // Wait for all calls to be created
+          await Promise.all(seedPromises);
 
-        // Then fetch the newly created calls
-        const freshResponse = await apiRequest('GET', `/api/calls/user/${userId}`);
-        const freshData = await freshResponse.json();
-        return freshData.data || [];
-      } catch (error) {
-        console.error("Error seeding initial calls:", error);
-        return [];
+          // Then fetch the newly created calls with pagination
+          const freshResponse = await apiRequest('GET', `/api/calls/user/${userId}?limit=${limit}&offset=${currentOffset}`);
+          const freshData = await freshResponse.json();
+          
+          // Update pagination state
+          if (freshData.totalCount !== undefined) {
+            setTotalCount(freshData.totalCount);
+          }
+          if (freshData.hasMore !== undefined) {
+            setHasMore(freshData.hasMore);
+          }
+          
+          return freshData;
+        } catch (error) {
+          console.error("Error seeding initial calls:", error);
+          return { data: [], totalCount: 0, hasMore: false, limit, offset: currentOffset };
+        }
       }
+
+      return { data: [], totalCount: 0, hasMore: false, limit, offset: currentOffset };
     },
     refetchOnWindowFocus: true,
     staleTime: 0, // Consider data stale immediately
     gcTime: 0     // Disable caching to always fetch fresh data
   });
+
+  // Extract calls data from the paginated response
+  const callsData = callsResponse?.data || [];
 
   // WebSocket connection for real-time call updates with enhanced reconnection
   useEffect(() => {
@@ -323,7 +362,7 @@ export default function CallDashboard() {
                 });
               }
               
-              // Refresh the main calls query to sync with database
+              // Refresh the main calls query to sync with database (all pagination states)
               queryClient.invalidateQueries({ queryKey: ['/api/calls/user', userId] });
             }
           } catch (error) {
@@ -538,6 +577,30 @@ export default function CallDashboard() {
       return newSet;
     });
   };
+
+  // Pagination handler functions
+  const handleNextPage = () => {
+    if (hasMore) {
+      setCurrentOffset(currentOffset + limit);
+    }
+  };
+
+  const handlePreviousPage = () => {
+    if (currentOffset > 0) {
+      setCurrentOffset(Math.max(0, currentOffset - limit));
+    }
+  };
+
+  const handleGoToPage = (page: number) => {
+    const newOffset = (page - 1) * limit;
+    if (newOffset >= 0 && newOffset < totalCount) {
+      setCurrentOffset(newOffset);
+    }
+  };
+
+  // Calculate current page and total pages
+  const currentPage = Math.floor(currentOffset / limit) + 1;
+  const totalPages = Math.ceil(totalCount / limit);
 
   const handleSaveNotes = () => {
     // Save to database (would be implemented in a full version)
@@ -1326,6 +1389,68 @@ EXPORT TIMESTAMP: ${new Date().toISOString()}
                   </TableBody>
                 </Table>
               </div>
+
+              {/* Pagination Controls */}
+              {totalCount > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border-t">
+                  <div className="text-sm text-muted-foreground">
+                    Showing {currentOffset + 1} to {Math.min(currentOffset + limit, totalCount)} of {totalCount} calls
+                  </div>
+                  
+                  <Pagination>
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious 
+                          onClick={handlePreviousPage}
+                          className={currentPage === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                          data-testid="pagination-previous"
+                        />
+                      </PaginationItem>
+                      
+                      {/* Page numbers */}
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pageNum;
+                        if (totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (currentPage <= 3) {
+                          pageNum = i + 1;
+                        } else if (currentPage >= totalPages - 2) {
+                          pageNum = totalPages - 4 + i;
+                        } else {
+                          pageNum = currentPage - 2 + i;
+                        }
+                        
+                        return (
+                          <PaginationItem key={pageNum}>
+                            <PaginationLink
+                              onClick={() => handleGoToPage(pageNum)}
+                              isActive={currentPage === pageNum}
+                              className="cursor-pointer"
+                              data-testid={`pagination-page-${pageNum}`}
+                            >
+                              {pageNum}
+                            </PaginationLink>
+                          </PaginationItem>
+                        );
+                      })}
+                      
+                      {totalPages > 5 && currentPage < totalPages - 2 && (
+                        <PaginationItem>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      )}
+                      
+                      <PaginationItem>
+                        <PaginationNext 
+                          onClick={handleNextPage}
+                          className={!hasMore ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                          data-testid="pagination-next"
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                </div>
+              )}
             </CardContent>
           </Card>
 
