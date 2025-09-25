@@ -42,7 +42,7 @@ router.get("/admin/users", async (req: Request, res: Response) => {
 // Setup Twilio integration for a specific user (ADMIN ONLY)
 router.post("/admin/users/:userId/twilio/setup", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     const { accountSid, authToken, phoneNumber } = req.body;
 
     if (isNaN(userId)) {
@@ -102,7 +102,7 @@ router.post("/admin/users/:userId/twilio/setup", async (req: Request, res: Respo
 // Get user's Twilio phone numbers (ADMIN ONLY)
 router.post("/admin/users/:userId/twilio/numbers", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     const { accountSid, authToken } = req.body;
 
     if (isNaN(userId)) {
@@ -158,7 +158,7 @@ router.post("/admin/users/:userId/twilio/numbers", async (req: Request, res: Res
 // Get user's current Twilio configuration (ADMIN ONLY)
 router.get("/admin/users/:userId/twilio/config", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
 
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
@@ -201,7 +201,7 @@ router.get("/admin/users/:userId/twilio/config", async (req: Request, res: Respo
 // Remove Twilio integration for a user (ADMIN ONLY)
 router.delete("/admin/users/:userId/twilio", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
 
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });

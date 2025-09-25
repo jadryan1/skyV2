@@ -21,7 +21,7 @@ import bcrypt from 'bcrypt';
 
 export interface IStorage {
   // User operations
-  getUser(id: number): Promise<User | undefined>;
+  getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   validateUserCredentials(credentials: LoginUser): Promise<User | undefined>;
@@ -31,36 +31,36 @@ export interface IStorage {
   resendVerificationEmail(email: string): Promise<boolean>;
 
   // Business info operations
-  getBusinessInfo(userId: number): Promise<any>;
-  updateBusinessInfo(userId: number, data: any): Promise<any>;
-  addBusinessLink(userId: number, link: string): Promise<any>;
-  removeBusinessLink(userId: number, index: number): Promise<any>;
-  addBusinessFile(userId: number, fileData: {fileName: string, fileType: string, fileUrl: string, fileSize?: string}): Promise<any>;
-  removeBusinessFile(userId: number, index: number): Promise<any>;
-  updateBusinessDescription(userId: number, description: string): Promise<any>;
-  updateBusinessProfile(userId: number, profileData: any): Promise<any>;
-  updateBusinessLogo(userId: number, logoUrl: string): Promise<any>;
+  getBusinessInfo(userId: string): Promise<any>;
+  updateBusinessInfo(userId: string, data: any): Promise<any>;
+  addBusinessLink(userId: string, link: string): Promise<any>;
+  removeBusinessLink(userId: string, index: number): Promise<any>;
+  addBusinessFile(userId: string, fileData: {fileName: string, fileType: string, fileUrl: string, fileSize?: string}): Promise<any>;
+  removeBusinessFile(userId: string, index: number): Promise<any>;
+  updateBusinessDescription(userId: string, description: string): Promise<any>;
+  updateBusinessProfile(userId: string, profileData: any): Promise<any>;
+  updateBusinessLogo(userId: string, logoUrl: string): Promise<any>;
 
   // Twilio integration operations
-  updateTwilioSettings(userId: number, settings: {accountSid: string | null, authToken: string | null, phoneNumber: string | null}): Promise<any>;
+  updateTwilioSettings(userId: string, settings: {accountSid: string | null, authToken: string | null, phoneNumber: string | null}): Promise<any>;
   getAllBusinessInfoWithTwilio(): Promise<any[]>;
   getAllUsers(): Promise<User[]>;
-  getCallsByUserId(userId: number): Promise<Call[]>;
+  getCallsByUserId(userId: string): Promise<Call[]>;
   createCall(callData: InsertCall): Promise<Call>;
   updateCallRecording(twilioCallSid: string, recordingUrl: string): Promise<void>;
   updateCallTranscript(twilioCallSid: string, transcript: string): Promise<void>;
   getCallByTwilioSid(callSid: string): Promise<any>;
   updateCall(callId: number, updateData: Partial<any>): Promise<void>;
-  generateApiKey(userId: number): Promise<string>;
+  generateApiKey(userId: string): Promise<string>;
   validateApiKey(apiKey: string): Promise<User | null>;
-  revokeApiKey(userId: number): Promise<void>;
+  revokeApiKey(userId: string): Promise<void>;
 }
 
 // Helper function to hash passwords
 // Using auth utility functions for password handling
 
 export class DatabaseStorage implements IStorage {
-  async getUser(id: number): Promise<User | undefined> {
+  async getUser(id: string): Promise<User | undefined> {
     const result = await db.select().from(users).where(eq(users.id, id));
     return result[0];
   }
@@ -243,7 +243,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Business info operations
-  async getBusinessInfo(userId: number): Promise<any> {
+  async getBusinessInfo(userId: string): Promise<any> {
     try {
       const result = await db.select().from(businessInfo).where(eq(businessInfo.userId, userId));
       return result[0];
@@ -253,7 +253,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async updateBusinessInfo(userId: number, data: any): Promise<any> {
+  async updateBusinessInfo(userId: string, data: any): Promise<any> {
     try {
       // Check if the record already exists
       const existingInfo = await this.getBusinessInfo(userId);
@@ -280,7 +280,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async addBusinessLink(userId: number, link: string): Promise<any> {
+  async addBusinessLink(userId: string, link: string): Promise<any> {
     try {
       const info = await this.getBusinessInfo(userId);
 
@@ -315,7 +315,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async removeBusinessLink(userId: number, index: number): Promise<any> {
+  async removeBusinessLink(userId: string, index: number): Promise<any> {
     try {
       const info = await this.getBusinessInfo(userId);
 
@@ -342,7 +342,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async addBusinessFile(userId: number, fileData: {fileName: string, fileType: string, fileUrl: string, fileSize?: string}): Promise<any> {
+  async addBusinessFile(userId: string, fileData: {fileName: string, fileType: string, fileUrl: string, fileSize?: string}): Promise<any> {
     try {
       const info = await this.getBusinessInfo(userId);
       const { fileName, fileType, fileUrl, fileSize = "Unknown" } = fileData;
@@ -386,7 +386,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async removeBusinessFile(userId: number, index: number): Promise<any> {
+  async removeBusinessFile(userId: string, index: number): Promise<any> {
     try {
       const info = await this.getBusinessInfo(userId);
 
@@ -425,7 +425,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async updateBusinessDescription(userId: number, description: string): Promise<any> {
+  async updateBusinessDescription(userId: string, description: string): Promise<any> {
     try {
       const info = await this.getBusinessInfo(userId);
 
@@ -457,7 +457,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async updateBusinessProfile(userId: number, profileData: any): Promise<any> {
+  async updateBusinessProfile(userId: string, profileData: any): Promise<any> {
     try {
       return await this.updateBusinessInfo(userId, profileData);
     } catch (error) {
@@ -466,7 +466,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async updateBusinessLogo(userId: number, logoUrl: string): Promise<any> {
+  async updateBusinessLogo(userId: string, logoUrl: string): Promise<any> {
     try {
       const info = await this.getBusinessInfo(userId);
 
@@ -499,7 +499,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Twilio integration methods
-  async updateTwilioSettings(userId: number, settings: {accountSid: string | null, authToken: string | null, phoneNumber: string | null}): Promise<any> {
+  async updateTwilioSettings(userId: string, settings: {accountSid: string | null, authToken: string | null, phoneNumber: string | null}): Promise<any> {
     try {
       const info = await this.getBusinessInfo(userId);
 
@@ -850,7 +850,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getCallsByUserId(userId: number): Promise<Call[]> {
+  async getCallsByUserId(userId: string): Promise<Call[]> {
     try {
       const result = await db.select().from(calls).where(eq(calls.userId, userId));
       return result;
@@ -861,7 +861,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // API Key management
-  async generateApiKey(userId: number): Promise<string> {
+  async generateApiKey(userId: string): Promise<string> {
     const apiKey = crypto.randomBytes(32).toString('hex');
     const hashedKey = await bcrypt.hash(apiKey, 10);
 
@@ -1017,7 +1017,7 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async revokeApiKey(userId: number): Promise<void> {
+  async revokeApiKey(userId: string): Promise<void> {
     try {
       await db
         .update(users)

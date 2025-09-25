@@ -7,7 +7,7 @@ const router = Router();
 // Process all documents for a user (manual trigger)
 router.post("/api/rag/process/:userId", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -39,7 +39,7 @@ router.post("/api/rag/process/:userId", async (req: Request, res: Response) => {
 // Search through processed documents
 router.get("/api/rag/search/:userId", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     const query = req.query.q as string;
     const limit = parseInt(req.query.limit as string) || 10;
 
@@ -71,7 +71,7 @@ router.get("/api/rag/search/:userId", async (req: Request, res: Response) => {
 // Get document processing status for a user
 router.get("/api/rag/status/:userId", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -92,7 +92,7 @@ router.get("/api/rag/status/:userId", async (req: Request, res: Response) => {
 // Auto-process documents when files are added (webhook style)
 router.post("/api/rag/auto-process/:userId", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }

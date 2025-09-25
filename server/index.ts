@@ -266,6 +266,37 @@ app.get('/webhooks/twilio/call-status', (req, res) => {
 });
 
 // API Routes
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { storage } = await import('./storage.js');
+    const { insertUserSchema } = await import('@shared/schema');
+    
+    // Validate request body
+    const validationResult = insertUserSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      return res.status(400).json({ 
+        message: 'Validation failed', 
+        errors: validationResult.error.errors 
+      });
+    }
+    
+    const user = await storage.createUser(validationResult.data);
+    const { password, ...userWithoutPassword } = user;
+    
+    res.status(201).json({ 
+      message: 'Registration successful', 
+      user: userWithoutPassword 
+    });
+  } catch (error) {
+    console.error('Registration error:', error);
+    if (error.message.includes('already exists')) {
+      res.status(409).json({ message: 'User with this email already exists' });
+    } else {
+      res.status(500).json({ message: 'Registration failed' });
+    }
+  }
+});
+
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { storage } = await import('./storage.js');
@@ -284,7 +315,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/user/:id', async (req, res) => {
   try {
     const { storage } = await import('./storage.js');
-    const user = await storage.getUser(parseInt(req.params.id));
+    const user = await storage.getUser(req.params.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -302,7 +333,7 @@ app.get('/api/calls/user/:userId', async (req, res) => {
     const { calls } = await import('@shared/schema');
     const { eq, desc, sql } = await import('drizzle-orm');
     
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = parseInt(req.query.offset as string) || 0;
     
@@ -365,7 +396,7 @@ app.post('/api/test/add-call/:userId', async (req, res) => {
     const { db } = await import('./db.js');
     const { calls } = await import('@shared/schema');
     
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: 'Invalid user ID' });
     }
@@ -408,7 +439,7 @@ app.post('/api/test/add-call/:userId', async (req, res) => {
 // Test ElevenLabs webhook endpoint
 app.post('/api/test/elevenlabs-call/:userId', async (req, res) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     
     // Simulate ElevenLabs webhook data
     const mockElevenLabsData = {

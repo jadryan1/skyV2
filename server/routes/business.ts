@@ -8,7 +8,7 @@ const router = express.Router();
 // Get business info for a user
 router.get("/api/business/:userId", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -54,7 +54,7 @@ router.get("/api/business/:userId", async (req: Request, res: Response) => {
 // Add or update business info
 router.post("/api/business/:userId", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -104,7 +104,7 @@ router.post("/api/business/:userId", async (req: Request, res: Response) => {
 // Add a link to business info
 router.post("/api/business/:userId/links", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -156,7 +156,7 @@ router.post("/api/business/:userId/links", async (req: Request, res: Response) =
 // Remove link
 router.delete("/api/business/:userId/links/:index", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     const index = parseInt(req.params.index);
     
     if (isNaN(userId) || isNaN(index)) {
@@ -200,7 +200,7 @@ router.delete("/api/business/:userId/links/:index", async (req: Request, res: Re
 // Add file details
 router.post("/api/business/:userId/files", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -271,7 +271,7 @@ router.post("/api/business/:userId/files", async (req: Request, res: Response) =
 // Add lead file
 router.post("/api/business/:userId/leads", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -335,7 +335,7 @@ router.post("/api/business/:userId/leads", async (req: Request, res: Response) =
 // Remove file
 router.delete("/api/business/:userId/files/:index", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     const index = parseInt(req.params.index);
     
     if (isNaN(userId) || isNaN(index)) {
@@ -400,7 +400,7 @@ router.delete("/api/business/:userId/files/:index", async (req: Request, res: Re
 // Remove lead file
 router.delete("/api/business/:userId/leads/:index", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     const index = parseInt(req.params.index);
     
     if (isNaN(userId) || isNaN(index)) {
@@ -465,7 +465,7 @@ router.delete("/api/business/:userId/leads/:index", async (req: Request, res: Re
 // Update complete business profile
 router.post("/api/business/:userId/profile", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -547,7 +547,7 @@ router.post("/api/business/:userId/profile", async (req: Request, res: Response)
 // Update description
 router.post("/api/business/:userId/description", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }

@@ -6,7 +6,7 @@ const router = Router();
 // Generate API key for a user
 router.post('/users/:userId/api-key/generate', async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -47,7 +47,7 @@ router.post('/users/:userId/api-key/generate', async (req: Request, res: Respons
 // Get API key information for a user
 router.get('/users/:userId/api-key/info', async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
@@ -76,7 +76,7 @@ router.get('/users/:userId/api-key/info', async (req: Request, res: Response) =>
 // Revoke API key for a user
 router.delete('/users/:userId/api-key', async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }

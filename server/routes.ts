@@ -170,7 +170,7 @@ async function findUserByPhoneNumber(toNumber: string, fromNumber: string): Prom
 // Remove the temporary placeholder and use this instead:
 app.get("/api/calls/user/:userId", async (req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
+    const userId = req.params.userId;
     if (isNaN(userId)) {
       return res.status(400).json({ message: "Invalid user ID" });
     }
