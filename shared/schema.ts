@@ -11,7 +11,7 @@ export const callStatusEnum = pgEnum('call_status_enum', ['in-progress', 'comple
 
 // Users table
 export const users = pgTable("users", {
-  id: serial("id").primaryKey(),
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
   businessName: text("business_name").notNull(),
@@ -32,7 +32,7 @@ export const users = pgTable("users", {
 // Call logs table
 export const calls = pgTable("calls", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
+  userId: text("user_id").notNull().references(() => users.id),
   phoneNumber: text("phone_number").notNull(),
   contactName: text("contact_name"),
   duration: integer("duration"), // Duration in seconds
@@ -50,7 +50,7 @@ export const calls = pgTable("calls", {
 // Leads table
 export const leads = pgTable("leads", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
+  userId: text("user_id").notNull().references(() => users.id),
   name: text("name").notNull(),
   phoneNumber: text("phone_number").notNull(),
   email: text("email"),
@@ -62,7 +62,7 @@ export const leads = pgTable("leads", {
 // Business info table
 export const businessInfo = pgTable("business_info", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id).unique(),
+  userId: text("user_id").notNull().references(() => users.id).unique(),
   businessName: text("business_name"),
   businessEmail: text("business_email"),
   businessPhone: text("business_phone"),
@@ -170,7 +170,7 @@ export type ForgotPasswordRequest = z.infer<typeof forgotPasswordSchema>;
 // Documents table - stores processed files and links
 export const documents = pgTable("documents", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
+  userId: text("user_id").notNull().references(() => users.id),
   sourceType: text("source_type").notNull(), // "file" or "link"
   sourceUrl: text("source_url").notNull(), // Original file URL or web link
   title: text("title").notNull(),
@@ -187,7 +187,7 @@ export const documents = pgTable("documents", {
 export const documentChunks = pgTable("document_chunks", {
   id: serial("id").primaryKey(),
   documentId: integer("document_id").notNull().references(() => documents.id),
-  userId: integer("user_id").notNull().references(() => users.id),
+  userId: text("user_id").notNull().references(() => users.id),
   chunkIndex: integer("chunk_index").notNull(), // Order within the document
   content: text("content").notNull(), // Chunk text content
   wordCount: integer("word_count").notNull(),
@@ -199,7 +199,7 @@ export const documentChunks = pgTable("document_chunks", {
 // Search queries table - logs search queries for analytics
 export const searchQueries = pgTable("search_queries", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
+  userId: text("user_id").notNull().references(() => users.id),
   query: text("query").notNull(),
   resultsCount: integer("results_count").notNull(),
   responseTime: integer("response_time"), // Response time in milliseconds
@@ -266,7 +266,7 @@ export type SearchQuery = typeof searchQueries.$inferSelect;
 // ElevenLabs conversations table
 export const elevenLabsConversations = pgTable("eleven_labs_conversations", {
   id: serial("id").primaryKey(),
-  userId: integer("user_id").notNull().references(() => users.id),
+  userId: text("user_id").notNull().references(() => users.id),
   conversationId: text("conversation_id").notNull(), // ElevenLabs conversation ID
   agentId: text("agent_id").notNull(), // ElevenLabs agent ID
   status: text("status").notNull(), // conversation status from ElevenLabs
