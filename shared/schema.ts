@@ -120,7 +120,6 @@ export const businessInfoRelations = relations(businessInfo, ({ one }) => ({
 
 // Schema for user insertion
 export const insertUserSchema = createInsertSchema(users).omit({ 
-  id: true, 
   verified: true, 
   createdAt: true,
   emailVerificationToken: true,

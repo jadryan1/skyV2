@@ -87,8 +87,12 @@ export class DatabaseStorage implements IStorage {
     const verificationToken = generateSecureToken();
     const verificationExpires = createTokenExpiration(24); // 24 hours to verify
 
+    // Generate UUID for the user (Supabase uses text UUIDs)
+    const userId = crypto.randomUUID();
+
     const userData = {
       ...insertUser,
+      id: userId, // Explicitly set the UUID
       email: insertUser.email.toLowerCase(),
       password: hashedPassword,
       verified: false,
@@ -97,18 +101,23 @@ export class DatabaseStorage implements IStorage {
       website: insertUser.website || null
     };
 
-    const result = await db.insert(users).values(userData).returning();
-    const newUser = result[0];
-
-    // Send verification email
     try {
-      await sendVerificationEmail(newUser.email, newUser.businessName, verificationToken);
-    } catch (error) {
-      console.error('Failed to send verification email:', error);
-      // Don't fail user creation if email fails, but log it
-    }
+      const result = await db.insert(users).values(userData).returning();
+      const newUser = result[0];
 
-    return newUser;
+      // Send verification email
+      try {
+        await sendVerificationEmail(newUser.email, newUser.businessName, verificationToken);
+      } catch (error) {
+        console.error('Failed to send verification email:', error);
+        // Don't fail user creation if email fails, but log it
+      }
+
+      return newUser;
+    } catch (error) {
+      console.error('Database error during user creation:', error);
+      throw new Error('Failed to create user. Please try again.');
+    }
   }
 
   async validateUserCredentials(credentials: LoginUser): Promise<User | undefined> {
